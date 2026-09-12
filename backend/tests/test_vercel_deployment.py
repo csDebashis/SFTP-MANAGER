@@ -59,9 +59,9 @@ def test_vercel_runtime_uses_tmp_storage_and_secure_demo_sessions(monkeypatch, t
 def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VERCEL", raising=False)
     monkeypatch.setenv("VERCEL_TMP_DIR", str(tmp_path))
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.delenv("MOCK_SFTP_ROOT", raising=False)
-    monkeypatch.delenv("APP_LOG_DIR", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./data/sftp-manager.db")
+    monkeypatch.setenv("MOCK_SFTP_ROOT", "./data/mock-sftp")
+    monkeypatch.setenv("APP_LOG_DIR", "./logs")
     monkeypatch.setattr("app.main.os.access", lambda *_args: False)
 
     assert _is_vercel_runtime() is True
@@ -71,3 +71,4 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     assert app.state.vercel_demo is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
+    assert (tmp_path / "sftp-manager" / "logs" / "application.log").is_file()

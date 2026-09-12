@@ -983,21 +983,20 @@ def create_app(
 
     vercel_runtime = _is_vercel_runtime()
     vercel_data_root = Path(os.getenv("VERCEL_TMP_DIR", "/tmp")) / "sftp-manager"
-    database_url = database_url or os.getenv("DATABASE_URL") or (
-        f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
-        if vercel_runtime
-        else "sqlite+aiosqlite:///./sftp-manager.db"
-    )
-    mock_root_path = Path(
-        mock_root
-        or os.getenv("MOCK_SFTP_ROOT")
-        or (vercel_data_root / "mock-sftp" if vercel_runtime else "./mock-sftp")
-    )
+    if vercel_runtime:
+        # Repository imports are disposable demos. Ignore inherited filesystem
+        # environment settings that commonly point into Vercel's read-only
+        # application image; direct create_app arguments remain available to tests.
+        database_url = database_url or f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
+        configured_mock_root = mock_root or vercel_data_root / "mock-sftp"
+        resolved_log_directory = log_directory or vercel_data_root / "logs"
+    else:
+        database_url = database_url or os.getenv("DATABASE_URL") or "sqlite+aiosqlite:///./sftp-manager.db"
+        configured_mock_root = mock_root or os.getenv("MOCK_SFTP_ROOT") or "./mock-sftp"
+        resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or "./logs"
+    mock_root_path = Path(configured_mock_root)
     if seed_demo is None:
         seed_demo = os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
-    resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or (
-        vercel_data_root / "logs" if vercel_runtime else "./logs"
-    )
     logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager

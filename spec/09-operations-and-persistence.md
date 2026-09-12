@@ -66,10 +66,13 @@ Deployment must enforce:
 - Importing the repository root from the `vercel` branch deploys the Next.js
   frontend and FastAPI backend together through Vercel Services. Ordered public
   rewrites route `/api/*` to FastAPI before routing all other paths to Next.js.
-- The import-ready configuration is demonstration-only. When Vercel identifies
-  its runtime, the backend uses the writable `/tmp/sftp-manager` tree for
+- The import-ready configuration is demonstration-only. When the backend detects
+  Vercel through its runtime environment, `/var/task` application mount, or a
+  read-only working directory, it uses the writable `/tmp/sftp-manager` tree for
   SQLite, mock SFTP files, and filesystem logs, seeds the documented demo users,
-  and emits secure session cookies unless explicitly overridden.
+  and emits secure session cookies unless explicitly overridden. Inherited
+  filesystem-path environment settings are ignored in this mode so container
+  defaults cannot redirect writes into the read-only application image.
 - Vercel demonstration state is instance-local and disposable. Scale-down,
   replacement, redeployment, or routing to another instance may reset or fork
   accounts, sessions, tasks, audit history, server configuration, and mock SFTP

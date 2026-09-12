@@ -7,13 +7,19 @@ defines a Next.js frontend service, a FastAPI backend service, and ordered
 same-domain routing. Select the **Services** framework preset during import if
 it is not detected automatically.
 
-When Vercel sets `VERCEL=1`, the backend defaults to these writable paths:
+When Vercel sets `VERCEL=1`, mounts the application under `/var/task`, or exposes
+a read-only working directory, the backend uses these writable paths:
 
 | Resource | Vercel demo path |
 |---|---|
 | SQLite | `/tmp/sftp-manager/sftp-manager.db` |
 | Mock SFTP | `/tmp/sftp-manager/mock-sftp` |
 | Application log | `/tmp/sftp-manager/logs/application.log` |
+
+In this demonstration mode, inherited `DATABASE_URL`, `MOCK_SFTP_ROOT`, and
+`APP_LOG_DIR` values are ignored so stale container-oriented paths cannot direct
+writes into Vercel's read-only application image. Explicit paths supplied by
+framework-native tests remain supported.
 
 This mode seeds the documented demo users and enables secure cookies by
 default. The paths are local to one stateless service instance and can disappear

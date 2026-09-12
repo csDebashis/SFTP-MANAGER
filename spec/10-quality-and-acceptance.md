@@ -116,7 +116,8 @@ Run against a disposable SFTP server and cover:
 - Vercel deployment tests validate that the committed Services configuration
   routes `/api/*` to FastAPI before the Next.js catch-all, and that the Vercel
   demo runtime selects writable `/tmp` storage, seeded demo users, and secure
-  cookies without requiring committed secrets.
+  cookies without requiring committed secrets, even when optional Vercel system
+  variables are absent or inherited filesystem settings target read-only paths.
 
 ## 15. Acceptance criteria and traceability
 
