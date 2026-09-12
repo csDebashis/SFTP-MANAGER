@@ -12,26 +12,28 @@ import logging
 import os
 import posixpath
 import secrets
+from calendar import monthrange
 from time import perf_counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import Database
 from .logging_config import configure_logging
-from .models import AuditEvent, FileUpload, FolderGrant, Group, GroupMember, LoginAttempt, Session, SftpServer, Task, User, utc_now
+from .models import AuditEvent, FileUpload, FolderGrant, Group, GroupMember, LoginAttempt, Session, SftpServer, Task, TaskDefinition, User, utc_now
 from .security import create_session_tokens, encrypt_credential, hash_password, token_hash, verify_password
 from .sftp.gateway import SftpGateway, canonical_path, seed_mock_files, valid_name
 
@@ -121,6 +123,9 @@ def task_json(task: Task) -> dict[str, Any]:
         effective_status = "OVERDUE"
     return {
         "id": task.id,
+        "definitionId": task.definition_id,
+        "occurrenceKey": task.occurrence_key,
+        "scheduledAt": as_utc(task.scheduled_at).isoformat() if task.scheduled_at else None,
         "title": task.title,
         "instructions": task.instructions,
         "serverId": task.server_id,
@@ -133,6 +138,32 @@ def task_json(task: Task) -> dict[str, Any]:
         "filenameGlob": task.filename_glob,
         "dismissalReason": task.dismissal_reason,
         "version": task.version,
+    }
+
+
+def task_definition_json(definition: TaskDefinition) -> dict[str, Any]:
+    """Serialize a reusable schedule without coupling clients to SQLAlchemy."""
+
+    return {
+        "id": definition.id,
+        "title": definition.title,
+        "instructions": definition.instructions,
+        "enabled": definition.enabled,
+        "serverId": definition.server_id,
+        "targetPath": definition.target_path,
+        "assigneeId": definition.assignee_id,
+        "createdBy": definition.created_by,
+        "scheduleType": definition.schedule_type,
+        "startAt": as_utc(definition.start_at).isoformat(),
+        "timezone": definition.timezone,
+        "weekdays": definition.weekdays,
+        "monthDay": definition.month_day,
+        "dueOffsetMinutes": definition.due_offset_minutes,
+        "completionMode": definition.completion_mode,
+        "filenameGlob": definition.filename_glob,
+        "nextRunAt": as_utc(definition.next_run_at).isoformat() if definition.next_run_at else None,
+        "lastGeneratedAt": as_utc(definition.last_generated_at).isoformat() if definition.last_generated_at else None,
+        "version": definition.version,
     }
 
 
@@ -309,13 +340,18 @@ class UploadStartInput(BaseModel):
         return valid_name(value)
 
 
-class TaskInput(BaseModel):
+class TaskDefinitionInput(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     instructions: str = Field(default="", max_length=5000)
     server_id: str = Field(alias="serverId")
     target_path: str = Field(alias="targetPath")
     assignee_id: str = Field(alias="assigneeId")
-    due_at: datetime = Field(alias="dueAt")
+    schedule_type: Literal["ONCE", "DAILY", "WEEKLY", "MONTHLY"] = Field(default="ONCE", alias="scheduleType")
+    start_at: datetime = Field(alias="startAt")
+    timezone_name: str = Field(default="UTC", alias="timezone", max_length=64)
+    weekdays: list[int] = Field(default_factory=list, max_length=7)
+    month_day: str | None = Field(default=None, alias="monthDay")
+    due_offset_minutes: int = Field(default=0, alias="dueOffsetMinutes", ge=0, le=43_200)
     completion_mode: Literal["MANUAL", "MATCHING_UPLOAD"] = Field(default="MANUAL", alias="completionMode")
     filename_glob: str | None = Field(default=None, alias="filenameGlob", max_length=255)
 
@@ -323,6 +359,41 @@ class TaskInput(BaseModel):
     @classmethod
     def validate_target(cls, value: str) -> str:
         return canonical_path(value)
+
+    @field_validator("timezone_name")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("unknown IANA timezone") from exc
+        return value
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, value: list[int]) -> list[int]:
+        if any(day < 0 or day > 6 for day in value):
+            raise ValueError("weekdays must contain values from 0 (Monday) through 6 (Sunday)")
+        return sorted(set(value))
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "TaskDefinitionInput":
+        if self.schedule_type == "WEEKLY" and not self.weekdays:
+            raise ValueError("at least one weekday is required for a weekly schedule")
+        if self.schedule_type == "MONTHLY":
+            if self.month_day != "LAST_DAY":
+                try:
+                    day = int(self.month_day or "")
+                except ValueError as exc:
+                    raise ValueError("monthly day must be 1–28 or LAST_DAY") from exc
+                if day < 1 or day > 28:
+                    raise ValueError("monthly day must be 1–28 or LAST_DAY")
+        if self.completion_mode == "MATCHING_UPLOAD":
+            if not self.filename_glob:
+                raise ValueError("filename pattern is required for matching-file completion")
+            if "[" in self.filename_glob or "]" in self.filename_glob:
+                raise ValueError("filename pattern supports only * and ? wildcards")
+        return self
 
 
 class DismissInput(BaseModel):
@@ -367,6 +438,156 @@ async def add_audit(
             detail=detail or {},
         )
     )
+
+
+def _localize_schedule_time(value: datetime, zone: ZoneInfo) -> datetime:
+    """Resolve a wall time using the first valid/first repeated occurrence.
+
+    `zoneinfo` accepts imaginary local timestamps during a spring-forward gap.
+    Round-tripping detects that case; advancing minute by minute implements the
+    product rule to use the first valid local time after the gap. ``fold=0``
+    selects the first occurrence when clocks move backward.
+    """
+
+    naive = value.replace(tzinfo=None)
+    for minute in range(181):
+        candidate = naive + timedelta(minutes=minute)
+        aware = candidate.replace(tzinfo=zone, fold=0)
+        round_trip = aware.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None)
+        if round_trip == candidate:
+            return aware
+    raise ValueError("schedule does not contain a valid local time")
+
+
+def _monthly_local_candidate(anchor: datetime, year: int, month: int, month_day: str, zone: ZoneInfo) -> datetime:
+    day = monthrange(year, month)[1] if month_day == "LAST_DAY" else int(month_day)
+    wall_time = datetime(year, month, day, anchor.hour, anchor.minute, anchor.second, anchor.microsecond)
+    return _localize_schedule_time(wall_time, zone)
+
+
+def first_schedule_occurrence(
+    start_at: datetime,
+    schedule_type: str,
+    timezone_name: str,
+    weekdays: list[int],
+    month_day: str | None,
+) -> datetime:
+    """Return the first UTC occurrence on or after a definition's start."""
+
+    zone = ZoneInfo(timezone_name)
+    start_local = as_utc(start_at).astimezone(zone)
+    if schedule_type == "ONCE":
+        return as_utc(start_at)
+    if schedule_type in {"DAILY", "WEEKLY"}:
+        allowed = set(weekdays)
+        for offset in range(8):
+            candidate = _localize_schedule_time(
+                start_local.replace(tzinfo=None) + timedelta(days=offset),
+                zone,
+            )
+            if (schedule_type == "DAILY" and not allowed) or candidate.weekday() in allowed:
+                return candidate.astimezone(timezone.utc)
+    if schedule_type == "MONTHLY" and month_day:
+        candidate = _monthly_local_candidate(start_local, start_local.year, start_local.month, month_day, zone)
+        if candidate < start_local:
+            year = start_local.year + (1 if start_local.month == 12 else 0)
+            month = 1 if start_local.month == 12 else start_local.month + 1
+            candidate = _monthly_local_candidate(start_local, year, month, month_day, zone)
+        return candidate.astimezone(timezone.utc)
+    raise ValueError("invalid task schedule")
+
+
+def next_schedule_occurrence(definition: TaskDefinition, occurrence: datetime) -> datetime | None:
+    """Calculate the next UTC occurrence after an emitted occurrence."""
+
+    if definition.schedule_type == "ONCE":
+        return None
+    zone = ZoneInfo(definition.timezone)
+    local = as_utc(occurrence).astimezone(zone)
+    if definition.schedule_type in {"DAILY", "WEEKLY"}:
+        allowed = set(definition.weekdays)
+        for offset in range(1, 9):
+            candidate = _localize_schedule_time(local.replace(tzinfo=None) + timedelta(days=offset), zone)
+            if (definition.schedule_type == "DAILY" and not allowed) or candidate.weekday() in allowed:
+                return candidate.astimezone(timezone.utc)
+    if definition.schedule_type == "MONTHLY" and definition.month_day:
+        year = local.year + (1 if local.month == 12 else 0)
+        month = 1 if local.month == 12 else local.month + 1
+        return _monthly_local_candidate(local, year, month, definition.month_day, zone).astimezone(timezone.utc)
+    raise ValueError("invalid task schedule")
+
+
+def add_system_audit(
+    db: AsyncSession,
+    action: str,
+    resource_type: str,
+    *,
+    resource_id: str | None = None,
+    server_id: str | None = None,
+    path: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Append an audit event for scheduler work without synthetic HTTP data."""
+
+    db.add(
+        AuditEvent(
+            request_id=f"scheduler-{uuid4().hex[:24]}",
+            actor_display="scheduler",
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            server_id=server_id,
+            path=path,
+            outcome="SUCCESS",
+            source_ip="system",
+            client_details="APScheduler",
+            detail=detail or {},
+        )
+    )
+
+
+async def complete_matching_tasks_for_file_event(
+    db: AsyncSession,
+    request: Request,
+    actor: User,
+    server_id: str,
+    folder_path: str,
+    filename: str,
+    file_path: str,
+    *,
+    detection: str,
+) -> int:
+    """Complete the actor's eligible assignments after an upload or move."""
+
+    tasks = (
+        await db.scalars(
+            select(Task).where(
+                Task.assignee_id == actor.id,
+                Task.server_id == server_id,
+                Task.target_path == folder_path,
+                Task.completion_mode == "MATCHING_UPLOAD",
+                Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]),
+            )
+        )
+    ).all()
+    completed = 0
+    for task in tasks:
+        if task.filename_glob and fnmatch.fnmatchcase(filename, task.filename_glob):
+            task.status = "COMPLETED"
+            task.version += 1
+            await add_audit(
+                db,
+                request,
+                "TASK_AUTO_COMPLETE",
+                "task",
+                actor=actor,
+                resource_id=task.id,
+                server_id=server_id,
+                path=file_path,
+                detail={"fileName": filename, "detection": detection},
+            )
+            completed += 1
+    return completed
 
 
 async def seed_demo_data(app: FastAPI) -> None:
@@ -458,14 +679,165 @@ async def bootstrap_admin(app: FastAPI) -> None:
         await db.commit()
 
 
-async def mark_overdue(app: FastAPI) -> None:
+async def generate_due_task_instances(app: FastAPI, now: datetime | None = None) -> int:
+    """Materialize every due schedule occurrence exactly once.
+
+    Occurrence keys remain unique in SQLite across restarts. Catch-up is
+    intentionally bounded per run so a long-disabled deployment cannot starve
+    request processing; subsequent scheduler ticks continue from `next_run_at`.
+    """
+
+    current_time = as_utc(now or utc_now())
+    generated = 0
     async with app.state.database.sessions() as db:
-        tasks = (await db.scalars(select(Task).where(Task.status.in_(["PENDING", "IN_PROGRESS"]), Task.due_at < utc_now()))).all()
+        definitions = (
+            await db.scalars(
+                select(TaskDefinition)
+                .where(
+                    TaskDefinition.enabled.is_(True),
+                    TaskDefinition.next_run_at.is_not(None),
+                    TaskDefinition.next_run_at <= current_time,
+                )
+                .order_by(TaskDefinition.next_run_at)
+            )
+        ).all()
+        for definition in definitions:
+            emitted_for_definition = 0
+            while (
+                definition.enabled
+                and definition.next_run_at
+                and as_utc(definition.next_run_at) <= current_time
+                and emitted_for_definition < 100
+            ):
+                scheduled_at = as_utc(definition.next_run_at)
+                occurrence_key = f"{definition.id}:{scheduled_at.isoformat()}"
+                existing = await db.scalar(select(Task.id).where(Task.occurrence_key == occurrence_key))
+                if not existing:
+                    due_at = scheduled_at + timedelta(minutes=definition.due_offset_minutes)
+                    task = Task(
+                        definition_id=definition.id,
+                        occurrence_key=occurrence_key,
+                        scheduled_at=scheduled_at,
+                        title=definition.title,
+                        instructions=definition.instructions,
+                        server_id=definition.server_id,
+                        target_path=definition.target_path,
+                        assignee_id=definition.assignee_id,
+                        created_by=definition.created_by,
+                        due_at=due_at,
+                        status="OVERDUE" if due_at < current_time else "PENDING",
+                        completion_mode=definition.completion_mode,
+                        filename_glob=definition.filename_glob,
+                    )
+                    db.add(task)
+                    await db.flush()
+                    add_system_audit(
+                        db,
+                        "TASK_INSTANCE_GENERATE",
+                        "task",
+                        resource_id=task.id,
+                        server_id=task.server_id,
+                        path=task.target_path,
+                        detail={"definitionId": definition.id, "occurrenceKey": occurrence_key},
+                    )
+                    generated += 1
+                definition.last_generated_at = scheduled_at
+                definition.next_run_at = next_schedule_occurrence(definition, scheduled_at)
+                definition.enabled = definition.next_run_at is not None
+                definition.version += 1
+                emitted_for_definition += 1
+        if definitions:
+            await db.commit()
+    return generated
+
+
+async def check_matching_task_files(app: FastAPI) -> int:
+    """Complete active matching-file tasks from SFTP directory state.
+
+    This catches files delivered by another approved SFTP client in addition to
+    uploads performed through the portal. A file must be at least as new as the
+    occurrence, preventing a prior period's artifact from completing a newly
+    generated recurring task.
+    """
+
+    async with app.state.database.sessions() as db:
+        rows = (
+            await db.execute(
+                select(Task, SftpServer)
+                .join(SftpServer, SftpServer.id == Task.server_id)
+                .where(
+                    Task.completion_mode == "MATCHING_UPLOAD",
+                    Task.filename_glob.is_not(None),
+                    Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]),
+                    SftpServer.enabled.is_(True),
+                )
+            )
+        ).all()
+
+    directory_cache: dict[tuple[str, str], list[dict[str, Any]] | None] = {}
+    matches: list[tuple[str, str, str]] = []
+    for task, server in rows:
+        key = (server.id, task.target_path)
+        if key not in directory_cache:
+            try:
+                directory_cache[key] = await app.state.gateway.list(server, task.target_path)
+            except Exception as exc:
+                app.state.logger.warning(
+                    "Scheduled task folder check failed",
+                    extra={"event": "task.file_check.failed", "error_type": type(exc).__name__},
+                )
+                directory_cache[key] = None
+        reference = as_utc(task.scheduled_at or task.created_at)
+        matching_item = next(
+            (
+                item
+                for item in directory_cache[key] or []
+                if item["type"] == "file"
+                and ".uploading-" not in str(item["name"])
+                and fnmatch.fnmatchcase(str(item["name"]), task.filename_glob or "")
+                and int(float(item["modifiedAt"])) >= int(reference.timestamp())
+            ),
+            None,
+        )
+        if matching_item:
+            matches.append((task.id, str(matching_item["name"]), str(matching_item["path"])))
+
+    completed = 0
+    if matches:
+        async with app.state.database.sessions() as db:
+            for task_id, filename, matched_path in matches:
+                task = await db.get(Task, task_id)
+                if not task or task.status not in {"PENDING", "IN_PROGRESS", "OVERDUE"}:
+                    continue
+                task.status = "COMPLETED"
+                task.version += 1
+                add_system_audit(
+                    db,
+                    "TASK_AUTO_COMPLETE",
+                    "task",
+                    resource_id=task.id,
+                    server_id=task.server_id,
+                    path=matched_path,
+                    detail={"fileName": filename, "detection": "SCHEDULED_FOLDER_CHECK"},
+                )
+                completed += 1
+            await db.commit()
+    return completed
+
+
+async def mark_overdue(app: FastAPI, now: datetime | None = None) -> int:
+    """Transition unresolved assignments after their due time."""
+
+    current_time = as_utc(now or utc_now())
+    async with app.state.database.sessions() as db:
+        tasks = (await db.scalars(select(Task).where(Task.status.in_(["PENDING", "IN_PROGRESS"]), Task.due_at < current_time))).all()
         for task in tasks:
             task.status = "OVERDUE"
             task.version += 1
+            add_system_audit(db, "TASK_OVERDUE", "task", resource_id=task.id, server_id=task.server_id, path=task.target_path)
         if tasks:
             await db.commit()
+        return len(tasks)
 
 
 def create_app(
@@ -488,8 +860,11 @@ def create_app(
         await app.state.database.initialize()
         await seed_demo_data(app)
         await bootstrap_admin(app)
+        await generate_due_task_instances(app)
         scheduler = AsyncIOScheduler(timezone="UTC")
-        scheduler.add_job(mark_overdue, "interval", minutes=1, args=[app], id="overdue", replace_existing=True)
+        scheduler.add_job(generate_due_task_instances, "interval", seconds=15, args=[app], id="task-generation", replace_existing=True, max_instances=1, coalesce=True)
+        scheduler.add_job(check_matching_task_files, "interval", seconds=30, args=[app], id="task-file-check", replace_existing=True, max_instances=1, coalesce=True)
+        scheduler.add_job(mark_overdue, "interval", seconds=15, args=[app], id="overdue", replace_existing=True, max_instances=1, coalesce=True)
         scheduler.start()
         app.state.scheduler = scheduler
         if app.state.seed_demo:
@@ -654,6 +1029,15 @@ def create_app(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Folder access denied")
         return server
 
+    async def require_task_manager(auth: AuthContext, db: AsyncSession, server_id: str, path: str) -> None:
+        """Enforce Admin or path-scoped Manager task-definition authority."""
+
+        require_active(auth)
+        if auth.user.role == "ADMIN":
+            return
+        if auth.user.role != "MANAGER" or "MANAGE_TASKS" not in await effective_permissions(db, auth.user, server_id, path):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Task management access required")
+
     @app.get("/api/v1/health/live")
     async def live() -> dict[str, str]:
         return {"status": "ok"}
@@ -661,6 +1045,8 @@ def create_app(
     @app.get("/api/v1/health/ready")
     async def ready(db: Db) -> dict[str, str]:
         await db.scalar(select(User.id).limit(1))
+        if not getattr(app.state, "scheduler", None) or not app.state.scheduler.running:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Scheduler is not ready")
         return {"status": "ready"}
 
     @app.post("/api/v1/auth/signup", status_code=201)
@@ -1087,6 +1473,7 @@ def create_app(
             raise HTTPException(404, "Server not found")
 
         grant_ids = list((await db.scalars(select(FolderGrant.id).where(FolderGrant.server_id == server_id))).all())
+        definition_ids = list((await db.scalars(select(TaskDefinition.id).where(TaskDefinition.server_id == server_id))).all())
         task_ids = list((await db.scalars(select(Task.id).where(Task.server_id == server_id))).all())
         upload_ids = list((await db.scalars(select(FileUpload.id).where(FileUpload.server_id == server_id))).all())
         server_name = server.name
@@ -1095,6 +1482,7 @@ def create_app(
         # transaction. Audit history intentionally remains after the server row is gone.
         await db.execute(delete(FileUpload).where(FileUpload.server_id == server_id))
         await db.execute(delete(Task).where(Task.server_id == server_id))
+        await db.execute(delete(TaskDefinition).where(TaskDefinition.server_id == server_id))
         await db.execute(delete(FolderGrant).where(FolderGrant.server_id == server_id))
         await db.delete(server)
         await add_audit(
@@ -1108,6 +1496,7 @@ def create_app(
             detail={
                 "serverName": server_name,
                 "deletedGrantCount": len(grant_ids),
+                "deletedTaskDefinitionCount": len(definition_ids),
                 "deletedTaskCount": len(task_ids),
                 "deletedUploadSessionCount": len(upload_ids),
             },
@@ -1515,11 +1904,16 @@ def create_app(
             upload.status = "COMPLETED"
             upload.updated_at = utc_now()
             await add_audit(db, request, action, "file", actor=auth.user, resource_id=upload.id, server_id=upload.server_id, path=target)
-        tasks = (await db.scalars(select(Task).where(Task.assignee_id == auth.user.id, Task.server_id == upload.server_id, Task.target_path == upload.folder_path, Task.completion_mode == "MATCHING_UPLOAD", Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"])))).all()
-        for task in tasks:
-            if task.filename_glob and fnmatch.fnmatchcase(upload.filename, task.filename_glob):
-                task.status, task.version = "COMPLETED", task.version + 1
-                await add_audit(db, request, "TASK_AUTO_COMPLETE", "task", actor=auth.user, resource_id=task.id, server_id=upload.server_id, path=target)
+        await complete_matching_tasks_for_file_event(
+            db,
+            request,
+            auth.user,
+            upload.server_id,
+            upload.folder_path,
+            upload.filename,
+            target,
+            detection="PORTAL_UPLOAD",
+        )
         await db.commit()
         return {"path": target}
 
@@ -1585,6 +1979,16 @@ def create_app(
         except FileExistsError:
             raise HTTPException(409, "Destination already exists")
         await add_audit(db, request, "ITEM_MOVE", "item", actor=auth.user, server_id=payload.server_id, path=destination, detail={"source": payload.source})
+        await complete_matching_tasks_for_file_event(
+            db,
+            request,
+            auth.user,
+            payload.server_id,
+            destination_parent,
+            posixpath.basename(destination),
+            destination,
+            detection="PORTAL_MOVE",
+        )
         await db.commit()
         return {"path": destination}
 
@@ -1611,23 +2015,139 @@ def create_app(
         tasks = (await db.scalars(query)).all()
         return {"items": [task_json(task) for task in tasks]}
 
-    @app.post("/api/v1/tasks", status_code=201)
-    async def create_task(payload: TaskInput, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
+    @app.get("/api/v1/task-definitions")
+    async def list_task_definitions(auth: Auth, db: Db) -> dict[str, Any]:
         require_active(auth)
-        if auth.user.role != "ADMIN":
-            if auth.user.role != "MANAGER" or "MANAGE_TASKS" not in await effective_permissions(db, auth.user, payload.server_id, payload.target_path):
-                raise HTTPException(403, "Task management access required")
-        await get_server(db, payload.server_id)
-        if not await db.get(User, payload.assignee_id):
+        if auth.user.role not in {"ADMIN", "MANAGER"}:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Task management access required")
+        definitions = (await db.scalars(select(TaskDefinition).order_by(TaskDefinition.created_at.desc()))).all()
+        if auth.user.role == "MANAGER":
+            definitions = [
+                definition
+                for definition in definitions
+                if "MANAGE_TASKS" in await effective_permissions(db, auth.user, definition.server_id, definition.target_path)
+            ]
+        return {"items": [task_definition_json(definition) for definition in definitions]}
+
+    @app.post("/api/v1/tasks", status_code=201, include_in_schema=False)
+    @app.post("/api/v1/task-definitions", status_code=201)
+    async def create_task_definition(payload: TaskDefinitionInput, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
+        await require_task_manager(auth, db, payload.server_id, payload.target_path)
+        server = await get_server(db, payload.server_id)
+        assignee = await db.get(User, payload.assignee_id)
+        if not assignee or assignee.state != "ACTIVE":
             raise HTTPException(422, "Assignee not found")
-        if payload.completion_mode == "MATCHING_UPLOAD" and not payload.filename_glob:
-            raise HTTPException(422, "Filename pattern is required")
-        task = Task(title=payload.title.strip(), instructions=payload.instructions.strip(), server_id=payload.server_id, target_path=payload.target_path, assignee_id=payload.assignee_id, created_by=auth.user.id, due_at=as_utc(payload.due_at), completion_mode=payload.completion_mode, filename_glob=payload.filename_glob)
-        db.add(task)
+        try:
+            await request.app.state.gateway.list(server, payload.target_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(422, "Task target folder does not exist") from exc
+        except Exception as exc:
+            raise HTTPException(502, "Task target folder could not be verified") from exc
+        first_occurrence = first_schedule_occurrence(
+            payload.start_at,
+            payload.schedule_type,
+            payload.timezone_name,
+            payload.weekdays,
+            payload.month_day,
+        )
+        definition = TaskDefinition(
+            title=payload.title.strip(),
+            instructions=payload.instructions.strip(),
+            server_id=payload.server_id,
+            target_path=payload.target_path,
+            assignee_id=payload.assignee_id,
+            created_by=auth.user.id,
+            schedule_type=payload.schedule_type,
+            start_at=as_utc(payload.start_at),
+            timezone=payload.timezone_name,
+            weekdays=payload.weekdays,
+            month_day=payload.month_day if payload.schedule_type == "MONTHLY" else None,
+            due_offset_minutes=payload.due_offset_minutes,
+            completion_mode=payload.completion_mode,
+            filename_glob=payload.filename_glob,
+            next_run_at=first_occurrence,
+        )
+        db.add(definition)
         await db.flush()
-        await add_audit(db, request, "TASK_CREATE", "task", actor=auth.user, resource_id=task.id, server_id=task.server_id, path=task.target_path)
+        await add_audit(
+            db,
+            request,
+            "TASK_DEFINITION_CREATE",
+            "task_definition",
+            actor=auth.user,
+            resource_id=definition.id,
+            server_id=definition.server_id,
+            path=definition.target_path,
+            detail={"scheduleType": definition.schedule_type},
+        )
         await db.commit()
-        return task_json(task)
+        await generate_due_task_instances(request.app)
+        await db.refresh(definition)
+        return task_definition_json(definition)
+
+    @app.patch("/api/v1/task-definitions/{definition_id}")
+    async def update_task_definition(
+        definition_id: str,
+        payload: TaskDefinitionInput,
+        request: Request,
+        auth: CsrfAuth,
+        db: Db,
+    ) -> dict[str, Any]:
+        definition = await db.get(TaskDefinition, definition_id)
+        if not definition:
+            raise HTTPException(404, "Task definition not found")
+        await require_task_manager(auth, db, definition.server_id, definition.target_path)
+        await require_task_manager(auth, db, payload.server_id, payload.target_path)
+        server = await get_server(db, payload.server_id)
+        assignee = await db.get(User, payload.assignee_id)
+        if not assignee or assignee.state != "ACTIVE":
+            raise HTTPException(422, "Assignee not found")
+        try:
+            await request.app.state.gateway.list(server, payload.target_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(422, "Task target folder does not exist") from exc
+        except Exception as exc:
+            raise HTTPException(502, "Task target folder could not be verified") from exc
+        definition.title = payload.title.strip()
+        definition.instructions = payload.instructions.strip()
+        definition.server_id = payload.server_id
+        definition.target_path = payload.target_path
+        definition.assignee_id = payload.assignee_id
+        definition.schedule_type = payload.schedule_type
+        definition.start_at = as_utc(payload.start_at)
+        definition.timezone = payload.timezone_name
+        definition.weekdays = payload.weekdays
+        definition.month_day = payload.month_day if payload.schedule_type == "MONTHLY" else None
+        definition.due_offset_minutes = payload.due_offset_minutes
+        definition.completion_mode = payload.completion_mode
+        definition.filename_glob = payload.filename_glob
+        definition.next_run_at = first_schedule_occurrence(
+            payload.start_at,
+            payload.schedule_type,
+            payload.timezone_name,
+            payload.weekdays,
+            payload.month_day,
+        )
+        definition.enabled = True
+        definition.version += 1
+        await add_audit(db, request, "TASK_DEFINITION_UPDATE", "task_definition", actor=auth.user, resource_id=definition.id, server_id=definition.server_id, path=definition.target_path)
+        await db.commit()
+        await generate_due_task_instances(request.app)
+        await db.refresh(definition)
+        return task_definition_json(definition)
+
+    @app.post("/api/v1/task-definitions/{definition_id}/disable")
+    async def disable_task_definition(definition_id: str, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
+        definition = await db.get(TaskDefinition, definition_id)
+        if not definition:
+            raise HTTPException(404, "Task definition not found")
+        await require_task_manager(auth, db, definition.server_id, definition.target_path)
+        definition.enabled = False
+        definition.next_run_at = None
+        definition.version += 1
+        await add_audit(db, request, "TASK_DEFINITION_DISABLE", "task_definition", actor=auth.user, resource_id=definition.id, server_id=definition.server_id, path=definition.target_path)
+        await db.commit()
+        return task_definition_json(definition)
 
     async def task_action(task_id: str, next_status: str, request: Request, auth: AuthContext, db: AsyncSession, reason: str | None = None) -> dict[str, Any]:
         require_active(auth)

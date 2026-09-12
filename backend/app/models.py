@@ -136,11 +136,48 @@ class FileUpload(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
-class Task(Base):
-    __tablename__ = "tasks"
-    __table_args__ = (Index("ix_task_assignee_due", "assignee_id", "due_at"),)
+class TaskDefinition(Base):
+    """Reusable schedule which produces immutable task occurrence snapshots."""
+
+    __tablename__ = "task_definitions"
+    __table_args__ = (Index("ix_task_definition_next_run", "enabled", "next_run_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(200))
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    server_id: Mapped[str] = mapped_column(ForeignKey("sftp_servers.id", ondelete="CASCADE"), index=True)
+    target_path: Mapped[str] = mapped_column(String(1024))
+    assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    schedule_type: Mapped[str] = mapped_column(String(16), default="ONCE")
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    weekdays: Mapped[list[int]] = mapped_column(JSON, default=list)
+    month_day: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    due_offset_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    completion_mode: Mapped[str] = mapped_column(String(24), default="MANUAL")
+    filename_glob: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Task(Base):
+    """One actionable occurrence generated from a task definition."""
+
+    __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_task_assignee_due", "assignee_id", "due_at"),
+        UniqueConstraint("occurrence_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    definition_id: Mapped[str | None] = mapped_column(ForeignKey("task_definitions.id", ondelete="CASCADE"), nullable=True, index=True)
+    occurrence_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     title: Mapped[str] = mapped_column(String(200))
     instructions: Mapped[str] = mapped_column(Text, default="")
     server_id: Mapped[str] = mapped_column(ForeignKey("sftp_servers.id", ondelete="RESTRICT"), index=True)

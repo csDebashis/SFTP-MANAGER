@@ -171,6 +171,7 @@ def test_deleting_server_atomically_removes_associated_configuration(client: Tes
     assert event["detail"] == {
         "serverName": server["name"],
         "deletedGrantCount": 1,
+        "deletedTaskDefinitionCount": 0,
         "deletedTaskCount": 1,
         "deletedUploadSessionCount": 1,
     }

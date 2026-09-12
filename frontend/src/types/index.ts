@@ -10,7 +10,41 @@ export type User = {
 
 export type Root = { serverId: string; serverName: string; path: string; permissions: string[] };
 export type FileItem = { name: string; path: string; type: "file" | "folder"; size: number; modifiedAt: number };
-export type Task = { id: string; title: string; instructions: string; serverId: string; targetPath: string; assigneeId: string; dueAt: string; status: string; completionMode: string; filenameGlob?: string };
+export type Task = {
+  id: string;
+  definitionId?: string;
+  occurrenceKey?: string;
+  scheduledAt?: string;
+  title: string;
+  instructions: string;
+  serverId: string;
+  targetPath: string;
+  assigneeId: string;
+  dueAt: string;
+  status: string;
+  completionMode: string;
+  filenameGlob?: string;
+};
+export type TaskDefinition = {
+  id: string;
+  title: string;
+  instructions: string;
+  enabled: boolean;
+  serverId: string;
+  targetPath: string;
+  assigneeId: string;
+  scheduleType: "ONCE" | "DAILY" | "WEEKLY" | "MONTHLY";
+  startAt: string;
+  timezone: string;
+  weekdays: number[];
+  monthDay?: string;
+  dueOffsetMinutes: number;
+  completionMode: string;
+  filenameGlob?: string;
+  nextRunAt?: string;
+  lastGeneratedAt?: string;
+  version: number;
+};
 export type AuditEvent = {
   id: string;
   timestamp: string;

@@ -1,7 +1,8 @@
 # Architecture and code guide
 
 This document is the starting point for maintainers. Product behavior and
-acceptance criteria remain authoritative in [`SPEC.md`](../SPEC.md).
+acceptance criteria remain authoritative in the domain modules indexed by
+[`SPEC.md`](../SPEC.md).
 
 ## Runtime topology
 
@@ -91,7 +92,7 @@ context fields only by extending the explicit allow-list in
 
 When changing behavior:
 
-1. Update the relevant acceptance requirement in `SPEC.md`.
+1. Update the relevant domain module linked from `SPEC.md`.
 2. Preserve UUID-based relationships and backend authorization.
 3. Add focused backend and/or frontend tests, including failure behavior.
 4. Add an Alembic migration for schema changes.
