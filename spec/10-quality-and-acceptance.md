@@ -89,6 +89,9 @@ Run against a disposable SFTP server and cover:
 
 - Startup rejects unsafe/missing configuration, an unwritable database path, and incompatible schema versions.
 - Operational logging tests cover every supported severity, HTTP status mapping, valid JSON-lines output, request-ID/route correlation, rotation settings, persistent container filesystem output, and exclusion of query strings, payloads, credentials, raw exceptions, IP addresses, and client metadata.
+- Compose deployment tests verify that `/var/log/sftp-manager/application.log`
+  is the same non-empty file exposed in the Git-ignored host
+  `/Users/debchowd/SFTP-MANAGER/logs` directory.
 - Health endpoints and metrics reflect scheduler and remote-server failures correctly.
 - Restart and container replacement preserve SQLite records and do not affect remote files.
 - Backup integrity and restore drills recover users, grants, tasks, encrypted credentials, and audit history.

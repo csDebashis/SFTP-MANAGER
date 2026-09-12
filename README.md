@@ -51,10 +51,12 @@ written a chunk to the remote SFTP temporary object and verified its size.
 ## Application logs
 
 The backend emits redacted JSON logs at `DEBUG`, `INFO`, `WARNING`, `ERROR`,
-and `CRITICAL` levels. Compose persists rotating files in the
-`application_logs` volume while also sending the records to container stdout:
+and `CRITICAL` levels. Compose bind-mounts the repository's ignored `logs`
+directory into the backend while also sending the records to container stdout.
+The active host file is `./logs/application.log`:
 
 ```bash
+tail -f logs/application.log
 docker compose logs --follow backend
 docker compose exec backend tail -n 100 /var/log/sftp-manager/application.log
 ```

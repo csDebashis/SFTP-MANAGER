@@ -25,7 +25,7 @@ Owner: Platform operations. Related modules:
 
 ## 12. Configuration and deployment
 
-The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Docker Compose builds each service from its own Dockerfile, connects them on a private network, mounts a named volume at `/data` in the backend for the SQLite database, and mounts a separate named volume at `/var/log/sftp-manager` for rotating application logs. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems.
+The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Docker Compose builds each service from its own Dockerfile, connects them on a private network, mounts a named volume at `/data` in the backend for the SQLite database, and bind-mounts the repository-local `./logs` host directory at `/var/log/sftp-manager` for rotating application logs. The host directory resolves to `/Users/debchowd/SFTP-MANAGER/logs` in the reference workspace and is excluded from Git. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems.
 
 Required production configuration includes:
 
@@ -46,7 +46,7 @@ Deployment must enforce:
 
 - One backend replica with one scheduler owner. Multiple frontend replicas are allowed outside the reference Compose deployment.
 - A persistent Docker volume for `/data`; container replacement must preserve this volume.
-- A separately protected persistent volume for `/var/log/sftp-manager`; application users cannot read it through application APIs, and operator/collector access follows least privilege.
+- A separately protected, writable host bind mount from `./logs` to `/var/log/sftp-manager`; application users cannot read it through application APIs, and operator/collector access follows least privilege.
 - SQLite WAL mode, foreign-key enforcement, a busy timeout, and `synchronous=FULL` for all production connections.
 - Nightly online SQLite backups using the SQLite backup API, integrity verification, retention policy, and periodic restore tests.
 - Network egress restricted to configured SFTP and SMTP destinations where the platform permits it.
@@ -57,8 +57,8 @@ Deployment must enforce:
 
 - `backend/Dockerfile` is a multi-stage Python image with separate `test` and `runtime` targets. The runtime target installs the application wheel, runs Alembic migrations, and starts one Uvicorn worker as a non-root user.
 - `frontend/Dockerfile` is a multi-stage Node.js image with separate `test`, `build`, and `runtime` targets. The runtime target starts the optimized Next.js application as a non-root user.
-- `compose.yaml` builds the two runtime targets, exposes only the frontend, waits for backend readiness, mounts the durable `sqlite_data` and `application_logs` volumes, and injects secrets as files.
-- `scripts/verify-build-deploy.sh` is the supported local release entry point. By default it builds and runs both test targets, validates Compose, builds production images, deploys with `docker compose up --detach --remove-orphans --wait`, verifies a non-empty backend filesystem log, and prints service status.
+- `compose.yaml` builds the two runtime targets, exposes only the frontend, waits for backend readiness, mounts the durable `sqlite_data` volume and Git-ignored host `./logs` directory, and injects secrets as files.
+- `scripts/verify-build-deploy.sh` is the supported local release entry point. By default it builds and runs both test targets, validates Compose, builds production images, creates and validates the writable host log directory, deploys with `docker compose up --detach --remove-orphans --wait`, verifies the same non-empty backend log through both container and host paths, and prints service status.
 - `scripts/verify-build-deploy.sh --verify-only` performs tests and production image builds without deploying.
 - Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. The script must stop before deployment if any prerequisite is missing.
 

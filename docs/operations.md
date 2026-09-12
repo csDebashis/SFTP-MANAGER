@@ -3,8 +3,15 @@
 ## Operational logging
 
 The backend writes the same redacted JSON-lines records to stdout and to a
-rotating file. The Compose deployment stores the files in the persistent
-`application_logs` volume at:
+rotating file. The Compose deployment bind-mounts the repository-local,
+Git-ignored host directory:
+
+```text
+/Users/debchowd/SFTP-MANAGER/logs
+```
+
+The active host file is `logs/application.log`; inside the backend container it
+is available at:
 
 ```text
 /var/log/sftp-manager/application.log
@@ -49,13 +56,14 @@ docker compose logs --follow backend
 Read the mounted filesystem log:
 
 ```bash
+tail -f logs/application.log
 docker compose exec backend tail -n 100 /var/log/sftp-manager/application.log
 ```
 
-Inspect the persistent volume location managed by Docker:
+Confirm the Compose bind mount:
 
 ```bash
-docker volume inspect sftp-manager_application_logs
+docker compose config
 ```
 
 The application never exposes operational files through an HTTP endpoint.
@@ -82,8 +90,8 @@ only the main database file while the service is writing; use SQLite's online
 backup API or stop the backend and capture the database together with its WAL
 state. Remote SFTP file contents are not stored in SQLite.
 
-Application logs and SQLite use separate volumes. Backing up one does not back
-up the other.
+Application logs in the host `logs` directory and SQLite in its Docker volume
+are separate. Backing up one does not back up the other.
 
 ## Incident correlation
 

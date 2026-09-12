@@ -30,7 +30,7 @@ services:
       - bootstrap_admin_password
     volumes:
       - sqlite_data:/data
-      - application_logs:/var/log/sftp-manager
+      - ./logs:/var/log/sftp-manager
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -84,7 +84,6 @@ services:
 
 volumes:
   sqlite_data:
-  application_logs:
 
 networks:
   app_network:
