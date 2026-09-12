@@ -62,6 +62,9 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     monkeypatch.setenv("DATABASE_URL", "sqlite+aiosqlite:///./data/sftp-manager.db")
     monkeypatch.setenv("MOCK_SFTP_ROOT", "./data/mock-sftp")
     monkeypatch.setenv("APP_LOG_DIR", "./logs")
+    monkeypatch.setenv("SEED_DEMO_USERS", "false")
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.delenv("BOOTSTRAP_ADMIN_PASSWORD_FILE", raising=False)
     monkeypatch.setattr("app.main.os.access", lambda *_args: False)
 
     assert _is_vercel_runtime() is True
@@ -69,6 +72,10 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     app = create_app()
 
     assert app.state.vercel_demo is True
+    assert app.state.seed_demo is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health/ready").json() == {"status": "ready"}
+
     assert (tmp_path / "sftp-manager" / "logs" / "application.log").is_file()

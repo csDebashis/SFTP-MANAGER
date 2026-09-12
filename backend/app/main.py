@@ -996,7 +996,7 @@ def create_app(
         resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or "./logs"
     mock_root_path = Path(configured_mock_root)
     if seed_demo is None:
-        seed_demo = os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+        seed_demo = True if vercel_runtime else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
     logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager

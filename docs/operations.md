@@ -16,9 +16,11 @@ a read-only working directory, the backend uses these writable paths:
 | Mock SFTP | `/tmp/sftp-manager/mock-sftp` |
 | Application log | `/tmp/sftp-manager/logs/application.log` |
 
-In this demonstration mode, inherited `DATABASE_URL`, `MOCK_SFTP_ROOT`, and
-`APP_LOG_DIR` values are ignored so stale container-oriented paths cannot direct
-writes into Vercel's read-only application image. Explicit paths supplied by
+In this demonstration mode, inherited `DATABASE_URL`, `MOCK_SFTP_ROOT`,
+`APP_LOG_DIR`, and `SEED_DEMO_USERS` values are ignored so stale
+container-oriented settings cannot direct writes into Vercel's read-only
+application image or require Docker secret files. The documented demo users are
+always seeded. Explicit paths and seed choices supplied directly by
 framework-native tests remain supported.
 
 This mode seeds the documented demo users and enables secure cookies by

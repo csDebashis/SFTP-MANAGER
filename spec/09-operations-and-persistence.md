@@ -71,8 +71,9 @@ Deployment must enforce:
   read-only working directory, it uses the writable `/tmp/sftp-manager` tree for
   SQLite, mock SFTP files, and filesystem logs, seeds the documented demo users,
   and emits secure session cookies unless explicitly overridden. Inherited
-  filesystem-path environment settings are ignored in this mode so container
-  defaults cannot redirect writes into the read-only application image.
+  filesystem-path and demo-seeding environment settings are ignored in this
+  mode so container defaults cannot redirect writes into the read-only
+  application image or require unavailable Docker secret files.
 - Vercel demonstration state is instance-local and disposable. Scale-down,
   replacement, redeployment, or routing to another instance may reset or fork
   accounts, sessions, tasks, audit history, server configuration, and mock SFTP
