@@ -28,6 +28,13 @@ def test_head_creates_current_schema_on_a_fresh_database(tmp_path: Path) -> None
         "definition_id",
         "occurrence_key",
         "scheduled_at",
+        "file_check_interval_minutes",
+        "last_checked_at",
+        "next_check_at",
+    }
+    assert {column["name"] for column in inspector.get_columns("task_definitions")} >= {
+        "file_check_interval_minutes",
+        "last_checked_at",
     }
     engine.dispose()
 
@@ -56,10 +63,16 @@ def test_task_migration_preserves_a_previous_schema(tmp_path: Path) -> None:
     inspector = sa.inspect(engine)
     assert inspector.has_table("task_definitions")
     task_columns = {column["name"] for column in inspector.get_columns("tasks")}
-    assert {"definition_id", "occurrence_key", "scheduled_at"} <= task_columns
+    assert {
+        "definition_id",
+        "occurrence_key",
+        "scheduled_at",
+        "file_check_interval_minutes",
+        "last_checked_at",
+        "next_check_at",
+    } <= task_columns
     indexes = {index["name"]: index for index in inspector.get_indexes("tasks")}
     assert indexes["uq_tasks_occurrence_key"]["unique"] == 1
     with engine.connect() as connection:
-        assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0004_task_scheduling"
+        assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0005_task_file_checks"
     engine.dispose()
-

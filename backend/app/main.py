@@ -27,7 +27,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
-from sqlalchemy import delete, or_, select
+from sqlalchemy import and_, case, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -136,7 +136,11 @@ def task_json(task: Task) -> dict[str, Any]:
         "status": effective_status,
         "completionMode": task.completion_mode,
         "filenameGlob": task.filename_glob,
+        "fileCheckIntervalMinutes": task.file_check_interval_minutes,
+        "lastCheckedAt": as_utc(task.last_checked_at).isoformat() if task.last_checked_at else None,
+        "nextCheckAt": as_utc(task.next_check_at).isoformat() if task.next_check_at else None,
         "dismissalReason": task.dismissal_reason,
+        "createdAt": as_utc(task.created_at).isoformat(),
         "version": task.version,
     }
 
@@ -161,10 +165,24 @@ def task_definition_json(definition: TaskDefinition) -> dict[str, Any]:
         "dueOffsetMinutes": definition.due_offset_minutes,
         "completionMode": definition.completion_mode,
         "filenameGlob": definition.filename_glob,
+        "fileCheckIntervalMinutes": definition.file_check_interval_minutes,
+        "lastCheckedAt": as_utc(definition.last_checked_at).isoformat() if definition.last_checked_at else None,
         "nextRunAt": as_utc(definition.next_run_at).isoformat() if definition.next_run_at else None,
         "lastGeneratedAt": as_utc(definition.last_generated_at).isoformat() if definition.last_generated_at else None,
         "version": definition.version,
     }
+
+
+def task_priority_order(now: datetime) -> tuple[Any, Any, Any, Any]:
+    """Order urgent work first, then newest unresolved assignments."""
+
+    unresolved = Task.status.in_(["PENDING", "IN_PROGRESS"])
+    overdue = or_(Task.status == "OVERDUE", and_(unresolved, Task.due_at < now))
+    active = Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"])
+    priority = case((overdue, 0), (active, 1), else_=2)
+    overdue_due_at = case((overdue, Task.due_at), else_=None)
+    recent_pending = case((active, Task.created_at), else_=None)
+    return priority, overdue_due_at.asc(), recent_pending.desc(), Task.created_at.desc()
 
 
 def upload_json(upload: FileUpload, *, chunk_size: int) -> dict[str, Any]:
@@ -354,6 +372,10 @@ class TaskDefinitionInput(BaseModel):
     due_offset_minutes: int = Field(default=0, alias="dueOffsetMinutes", ge=0, le=43_200)
     completion_mode: Literal["MANUAL", "MATCHING_UPLOAD"] = Field(default="MANUAL", alias="completionMode")
     filename_glob: str | None = Field(default=None, alias="filenameGlob", max_length=255)
+    file_check_interval_minutes: Literal[5, 10, 30, 60, 1440] = Field(
+        default=5,
+        alias="fileCheckIntervalMinutes",
+    )
 
     @field_validator("target_path")
     @classmethod
@@ -574,6 +596,8 @@ async def complete_matching_tasks_for_file_event(
     for task in tasks:
         if task.filename_glob and fnmatch.fnmatchcase(filename, task.filename_glob):
             task.status = "COMPLETED"
+            task.last_checked_at = utc_now()
+            task.next_check_at = None
             task.version += 1
             await add_audit(
                 db,
@@ -647,6 +671,8 @@ async def seed_demo_data(app: FastAPI) -> None:
                 due_at=utc_now() + timedelta(days=3),
                 completion_mode="MATCHING_UPLOAD",
                 filename_glob="reconciliation-*.csv",
+                file_check_interval_minutes=5,
+                next_check_at=utc_now(),
             )
         )
         await db.commit()
@@ -677,6 +703,66 @@ async def bootstrap_admin(app: FastAPI) -> None:
         await db.flush()
         db.add(AuditEvent(request_id="bootstrap", actor_id=admin.id, actor_display=admin.email, action="USER_BOOTSTRAP", resource_type="user", resource_id=admin.id, outcome="SUCCESS", detail={}))
         await db.commit()
+
+
+async def materialize_task_occurrence(
+    db: AsyncSession,
+    definition: TaskDefinition,
+    scheduled_at: datetime,
+    current_time: datetime,
+) -> bool:
+    """Create one immutable assignment snapshot unless its occurrence exists."""
+
+    occurrence = as_utc(scheduled_at)
+    occurrence_key = f"{definition.id}:{occurrence.isoformat()}"
+    if await db.scalar(select(Task.id).where(Task.occurrence_key == occurrence_key)):
+        return False
+    due_at = occurrence + timedelta(minutes=definition.due_offset_minutes)
+    task = Task(
+        definition_id=definition.id,
+        occurrence_key=occurrence_key,
+        scheduled_at=occurrence,
+        title=definition.title,
+        instructions=definition.instructions,
+        server_id=definition.server_id,
+        target_path=definition.target_path,
+        assignee_id=definition.assignee_id,
+        created_by=definition.created_by,
+        due_at=due_at,
+        status="OVERDUE" if due_at < current_time else "PENDING",
+        completion_mode=definition.completion_mode,
+        filename_glob=definition.filename_glob,
+        file_check_interval_minutes=definition.file_check_interval_minutes,
+        next_check_at=max(occurrence, current_time) if definition.completion_mode == "MATCHING_UPLOAD" else None,
+    )
+    db.add(task)
+    await db.flush()
+    add_system_audit(
+        db,
+        "TASK_INSTANCE_GENERATE",
+        "task",
+        resource_id=task.id,
+        server_id=task.server_id,
+        path=task.target_path,
+        detail={"definitionId": definition.id, "occurrenceKey": occurrence_key},
+    )
+    return True
+
+
+async def materialize_first_task_instance(
+    db: AsyncSession,
+    definition: TaskDefinition,
+    first_occurrence: datetime,
+    current_time: datetime,
+) -> bool:
+    """Expose a newly assigned schedule immediately, even before it starts."""
+
+    created = await materialize_task_occurrence(db, definition, first_occurrence, current_time)
+    definition.last_generated_at = as_utc(first_occurrence)
+    definition.next_run_at = next_schedule_occurrence(definition, first_occurrence)
+    definition.enabled = definition.next_run_at is not None
+    definition.version += 1
+    return created
 
 
 async def generate_due_task_instances(app: FastAPI, now: datetime | None = None) -> int:
@@ -710,36 +796,7 @@ async def generate_due_task_instances(app: FastAPI, now: datetime | None = None)
                 and emitted_for_definition < 100
             ):
                 scheduled_at = as_utc(definition.next_run_at)
-                occurrence_key = f"{definition.id}:{scheduled_at.isoformat()}"
-                existing = await db.scalar(select(Task.id).where(Task.occurrence_key == occurrence_key))
-                if not existing:
-                    due_at = scheduled_at + timedelta(minutes=definition.due_offset_minutes)
-                    task = Task(
-                        definition_id=definition.id,
-                        occurrence_key=occurrence_key,
-                        scheduled_at=scheduled_at,
-                        title=definition.title,
-                        instructions=definition.instructions,
-                        server_id=definition.server_id,
-                        target_path=definition.target_path,
-                        assignee_id=definition.assignee_id,
-                        created_by=definition.created_by,
-                        due_at=due_at,
-                        status="OVERDUE" if due_at < current_time else "PENDING",
-                        completion_mode=definition.completion_mode,
-                        filename_glob=definition.filename_glob,
-                    )
-                    db.add(task)
-                    await db.flush()
-                    add_system_audit(
-                        db,
-                        "TASK_INSTANCE_GENERATE",
-                        "task",
-                        resource_id=task.id,
-                        server_id=task.server_id,
-                        path=task.target_path,
-                        detail={"definitionId": definition.id, "occurrenceKey": occurrence_key},
-                    )
+                if await materialize_task_occurrence(db, definition, scheduled_at, current_time):
                     generated += 1
                 definition.last_generated_at = scheduled_at
                 definition.next_run_at = next_schedule_occurrence(definition, scheduled_at)
@@ -751,7 +808,14 @@ async def generate_due_task_instances(app: FastAPI, now: datetime | None = None)
     return generated
 
 
-async def check_matching_task_files(app: FastAPI) -> int:
+async def check_matching_task_files(
+    app: FastAPI,
+    *,
+    task_ids: set[str] | None = None,
+    force: bool = False,
+    now: datetime | None = None,
+    detection: str = "SCHEDULED_FOLDER_CHECK",
+) -> int:
     """Complete active matching-file tasks from SFTP directory state.
 
     This catches files delivered by another approved SFTP client in addition to
@@ -760,22 +824,28 @@ async def check_matching_task_files(app: FastAPI) -> int:
     generated recurring task.
     """
 
+    current_time = as_utc(now or utc_now())
     async with app.state.database.sessions() as db:
+        conditions = [
+            Task.completion_mode == "MATCHING_UPLOAD",
+            Task.filename_glob.is_not(None),
+            Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]),
+            SftpServer.enabled.is_(True),
+        ]
+        if task_ids is not None:
+            conditions.append(Task.id.in_(task_ids))
+        if not force:
+            conditions.extend([Task.next_check_at.is_not(None), Task.next_check_at <= current_time])
         rows = (
             await db.execute(
                 select(Task, SftpServer)
                 .join(SftpServer, SftpServer.id == Task.server_id)
-                .where(
-                    Task.completion_mode == "MATCHING_UPLOAD",
-                    Task.filename_glob.is_not(None),
-                    Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]),
-                    SftpServer.enabled.is_(True),
-                )
+                .where(*conditions)
             )
         ).all()
 
     directory_cache: dict[tuple[str, str], list[dict[str, Any]] | None] = {}
-    matches: list[tuple[str, str, str]] = []
+    checks: list[tuple[str, str | None, str | None]] = []
     for task, server in rows:
         key = (server.id, task.target_path)
         if key not in directory_cache:
@@ -799,18 +869,33 @@ async def check_matching_task_files(app: FastAPI) -> int:
             ),
             None,
         )
-        if matching_item:
-            matches.append((task.id, str(matching_item["name"]), str(matching_item["path"])))
+        checks.append(
+            (
+                task.id,
+                str(matching_item["name"]) if matching_item else None,
+                str(matching_item["path"]) if matching_item else None,
+            )
+        )
 
     completed = 0
-    if matches:
+    if checks:
         async with app.state.database.sessions() as db:
-            for task_id, filename, matched_path in matches:
+            for task_id, filename, matched_path in checks:
                 task = await db.get(Task, task_id)
                 if not task or task.status not in {"PENDING", "IN_PROGRESS", "OVERDUE"}:
                     continue
-                task.status = "COMPLETED"
+                task.last_checked_at = current_time
+                task.next_check_at = current_time + timedelta(minutes=task.file_check_interval_minutes)
                 task.version += 1
+                if task.definition_id:
+                    definition = await db.get(TaskDefinition, task.definition_id)
+                    if definition:
+                        definition.last_checked_at = current_time
+                        definition.version += 1
+                if not filename or not matched_path:
+                    continue
+                task.status = "COMPLETED"
+                task.next_check_at = None
                 add_system_audit(
                     db,
                     "TASK_AUTO_COMPLETE",
@@ -818,7 +903,7 @@ async def check_matching_task_files(app: FastAPI) -> int:
                     resource_id=task.id,
                     server_id=task.server_id,
                     path=matched_path,
-                    detail={"fileName": filename, "detection": "SCHEDULED_FOLDER_CHECK"},
+                    detail={"fileName": filename, "detection": detection},
                 )
                 completed += 1
             await db.commit()
@@ -863,7 +948,17 @@ def create_app(
         await generate_due_task_instances(app)
         scheduler = AsyncIOScheduler(timezone="UTC")
         scheduler.add_job(generate_due_task_instances, "interval", seconds=15, args=[app], id="task-generation", replace_existing=True, max_instances=1, coalesce=True)
-        scheduler.add_job(check_matching_task_files, "interval", seconds=30, args=[app], id="task-file-check", replace_existing=True, max_instances=1, coalesce=True)
+        file_check_dispatch_seconds = max(15, int(os.getenv("TASK_FILE_CHECK_DISPATCH_SECONDS", "60")))
+        scheduler.add_job(
+            check_matching_task_files,
+            "interval",
+            seconds=file_check_dispatch_seconds,
+            args=[app],
+            id="task-file-check",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
         scheduler.add_job(mark_overdue, "interval", seconds=15, args=[app], id="overdue", replace_existing=True, max_instances=1, coalesce=True)
         scheduler.start()
         app.state.scheduler = scheduler
@@ -2009,7 +2104,7 @@ def create_app(
     @app.get("/api/v1/tasks")
     async def list_tasks(auth: Auth, db: Db) -> dict[str, Any]:
         require_active(auth)
-        query = select(Task).order_by(Task.due_at)
+        query = select(Task).order_by(*task_priority_order(utc_now()))
         if auth.user.role not in {"ADMIN", "AUDITOR"}:
             query = query.where(Task.assignee_id == auth.user.id)
         tasks = (await db.scalars(query)).all()
@@ -2065,10 +2160,12 @@ def create_app(
             due_offset_minutes=payload.due_offset_minutes,
             completion_mode=payload.completion_mode,
             filename_glob=payload.filename_glob,
+            file_check_interval_minutes=payload.file_check_interval_minutes,
             next_run_at=first_occurrence,
         )
         db.add(definition)
         await db.flush()
+        await materialize_first_task_instance(db, definition, first_occurrence, utc_now())
         await add_audit(
             db,
             request,
@@ -2078,7 +2175,10 @@ def create_app(
             resource_id=definition.id,
             server_id=definition.server_id,
             path=definition.target_path,
-            detail={"scheduleType": definition.schedule_type},
+            detail={
+                "scheduleType": definition.schedule_type,
+                "fileCheckIntervalMinutes": definition.file_check_interval_minutes,
+            },
         )
         await db.commit()
         await generate_due_task_instances(request.app)
@@ -2121,15 +2221,18 @@ def create_app(
         definition.due_offset_minutes = payload.due_offset_minutes
         definition.completion_mode = payload.completion_mode
         definition.filename_glob = payload.filename_glob
-        definition.next_run_at = first_schedule_occurrence(
+        definition.file_check_interval_minutes = payload.file_check_interval_minutes
+        first_occurrence = first_schedule_occurrence(
             payload.start_at,
             payload.schedule_type,
             payload.timezone_name,
             payload.weekdays,
             payload.month_day,
         )
+        definition.next_run_at = first_occurrence
         definition.enabled = True
         definition.version += 1
+        await materialize_first_task_instance(db, definition, first_occurrence, utc_now())
         await add_audit(db, request, "TASK_DEFINITION_UPDATE", "task_definition", actor=auth.user, resource_id=definition.id, server_id=definition.server_id, path=definition.target_path)
         await db.commit()
         await generate_due_task_instances(request.app)
@@ -2172,6 +2275,10 @@ def create_app(
         if next_status not in transitions.get(task.status, set()):
             raise HTTPException(409, f"Task cannot change from {task.status} to {next_status}")
         task.status, task.dismissal_reason, task.version = next_status, reason, task.version + 1
+        if next_status in {"COMPLETED", "DISMISSED"}:
+            task.next_check_at = None
+        elif next_status == "PENDING" and task.completion_mode == "MATCHING_UPLOAD":
+            task.next_check_at = utc_now()
         await add_audit(db, request, f"TASK_{next_status}", "task", actor=auth.user, resource_id=task.id, server_id=task.server_id, path=task.target_path, detail={"reason": reason} if reason else {})
         await db.commit()
         return task_json(task)
@@ -2191,6 +2298,38 @@ def create_app(
     @app.post("/api/v1/tasks/{task_id}/reopen")
     async def reopen_task(task_id: str, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
         return await task_action(task_id, "PENDING", request, auth, db)
+
+    @app.post("/api/v1/tasks/{task_id}/check")
+    async def check_task_file(task_id: str, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
+        """Force one matching-file task check for the assignee or its manager."""
+
+        require_active(auth)
+        task = await db.get(Task, task_id)
+        if not task:
+            raise HTTPException(404, "Task not found")
+        manager = auth.user.role == "ADMIN" or (
+            auth.user.role == "MANAGER"
+            and "MANAGE_TASKS" in await effective_permissions(db, auth.user, task.server_id, task.target_path)
+        )
+        if task.assignee_id != auth.user.id and not manager:
+            raise HTTPException(403, "Task check denied")
+        if task.completion_mode != "MATCHING_UPLOAD":
+            raise HTTPException(409, "Only matching-file tasks can check an SFTP folder")
+        if task.status not in {"PENDING", "IN_PROGRESS", "OVERDUE"}:
+            raise HTTPException(409, "Completed or dismissed tasks cannot be checked")
+
+        await check_matching_task_files(
+            request.app,
+            task_ids={task.id},
+            force=True,
+            detection="MANUAL_FOLDER_REFRESH",
+        )
+        await db.rollback()
+        task = await db.get(Task, task_id)
+        if not task:  # Defensive against a concurrent server cascade delete.
+            raise HTTPException(404, "Task not found")
+        await db.refresh(task)
+        return {"task": task_json(task), "matched": task.status == "COMPLETED"}
 
     @app.get("/api/v1/audit-events")
     async def list_audit(auth: Auth, db: Db, limit: int = 100) -> dict[str, Any]:
@@ -2226,7 +2365,12 @@ def create_app(
     async def dashboard(auth: Auth, db: Db) -> dict[str, Any]:
         require_active(auth)
         roots = await file_roots(auth, db)
-        task_query = select(Task).where(Task.assignee_id == auth.user.id, Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"])).order_by(Task.due_at).limit(20)
+        task_query = (
+            select(Task)
+            .where(Task.assignee_id == auth.user.id, Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]))
+            .order_by(*task_priority_order(utc_now()))
+            .limit(20)
+        )
         tasks = (await db.scalars(task_query)).all()
         audit_query = (
             select(AuditEvent)

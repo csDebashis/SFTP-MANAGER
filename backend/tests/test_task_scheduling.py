@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
 from app.main import _localize_schedule_time, check_matching_task_files, first_schedule_occurrence, generate_due_task_instances
+
+
+def _login(client: TestClient, email: str, password: str) -> dict[str, str]:
+    response = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert response.status_code == 200, response.text
+    return {"X-CSRF-Token": response.json()["csrfToken"]}
 
 
 def _assignee_id(client: TestClient) -> str:
@@ -36,6 +43,7 @@ def _definition_payload(client: TestClient, start_at: datetime, **changes: objec
         "dueOffsetMinutes": 60,
         "completionMode": "MANUAL",
         "filenameGlob": None,
+        "fileCheckIntervalMinutes": 5,
     }
     payload.update(changes)
     return payload
@@ -141,6 +149,127 @@ def test_scheduled_folder_check_completes_matching_external_delivery(
     audit = client.get("/api/v1/audit-events").json()["items"]
     event = next(item for item in audit if item["action"] == "TASK_AUTO_COMPLETE" and item["resourceId"] == task["id"])
     assert event["detail"] == {"fileName": "external-delivery.csv", "detection": "SCHEDULED_FOLDER_CHECK"}
+
+
+def test_future_assignment_is_immediately_visible_to_its_user(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    """A scheduled definition must not hide its first work item until start time."""
+
+    created = client.post(
+        "/api/v1/task-definitions",
+        json=_definition_payload(
+            client,
+            datetime.now(timezone.utc) + timedelta(days=1),
+            title="Visible future delivery",
+        ),
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+
+    _login(client, "user@gmail.com", "User123!Secure")
+    current_user_id = client.get("/api/v1/auth/me").json()["user"]["id"]
+    visible = client.get("/api/v1/tasks")
+    assert visible.status_code == 200, visible.text
+    assignment = next(item for item in visible.json()["items"] if item["definitionId"] == created.json()["id"])
+    assert assignment["assigneeId"] == current_user_id
+    assert assignment["status"] == "PENDING"
+
+
+def test_user_tasks_sort_overdue_then_recent_pending(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    now = datetime.now(timezone.utc)
+    for title, start in (
+        ("Expired delivery", now - timedelta(minutes=5)),
+        ("Older pending delivery", now + timedelta(hours=3)),
+        ("Recent pending delivery", now + timedelta(hours=2)),
+    ):
+        response = client.post(
+            "/api/v1/task-definitions",
+            json=_definition_payload(client, start, title=title, dueOffsetMinutes=0),
+            headers=admin_headers,
+        )
+        assert response.status_code == 201, response.text
+
+    _login(client, "user@gmail.com", "User123!Secure")
+    titles = [item["title"] for item in client.get("/api/v1/tasks").json()["items"]]
+    selected = [title for title in titles if title in {"Expired delivery", "Older pending delivery", "Recent pending delivery"}]
+    assert selected == ["Expired delivery", "Recent pending delivery", "Older pending delivery"]
+
+
+def test_matching_check_interval_and_manual_refresh(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    initial_check = datetime.now(timezone.utc)
+    created = client.post(
+        "/api/v1/task-definitions",
+        json=_definition_payload(
+            client,
+            initial_check - timedelta(seconds=2),
+            completionMode="MATCHING_UPLOAD",
+            filenameGlob="arrival-*.csv",
+            fileCheckIntervalMinutes=10,
+        ),
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    definition_id = created.json()["id"]
+    task = next(item for item in client.get("/api/v1/tasks").json()["items"] if item["definitionId"] == definition_id)
+
+    assert client.portal is not None
+    scan_time = initial_check + timedelta(seconds=5)
+    assert client.portal.call(partial(check_matching_task_files, now=scan_time), client.app) == 0
+    checked_task = next(item for item in client.get("/api/v1/tasks").json()["items"] if item["id"] == task["id"])
+    assert checked_task["fileCheckIntervalMinutes"] == 10
+    assert datetime.fromisoformat(checked_task["lastCheckedAt"]) == scan_time
+    assert datetime.fromisoformat(checked_task["nextCheckAt"]) == scan_time + timedelta(minutes=10)
+
+    external_file: Path = client.app.state.gateway._mock_path("/shared/arrival-external.csv")
+    external_file.write_text("arrived\n", encoding="utf-8")
+    future_timestamp = initial_check.timestamp() + 1
+    os.utime(external_file, (future_timestamp, future_timestamp))
+
+    # The dispatcher does not scan this task again before its selected interval.
+    assert client.portal.call(
+        partial(check_matching_task_files, now=scan_time + timedelta(minutes=1)),
+        client.app,
+    ) == 0
+
+    user_headers = _login(client, "user@gmail.com", "User123!Secure")
+    refreshed = client.post(f"/api/v1/tasks/{task['id']}/check", headers=user_headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["matched"] is True
+    assert refreshed.json()["task"]["status"] == "COMPLETED"
+    assert refreshed.json()["task"]["lastCheckedAt"] is not None
+
+    _login(client, "admin@gmail.com", "Admin123!Secure")
+    definition = next(
+        item for item in client.get("/api/v1/task-definitions").json()["items"]
+        if item["id"] == definition_id
+    )
+    assert definition["lastCheckedAt"] is not None
+
+
+def test_matching_check_interval_rejects_unsupported_values(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    response = client.post(
+        "/api/v1/task-definitions",
+        json=_definition_payload(
+            client,
+            datetime.now(timezone.utc),
+            completionMode="MATCHING_UPLOAD",
+            filenameGlob="*.csv",
+            fileCheckIntervalMinutes=2,
+        ),
+        headers=admin_headers,
+    )
+    assert response.status_code == 422
 
 
 def test_schedule_calculation_handles_last_day_and_dst_gap() -> None:

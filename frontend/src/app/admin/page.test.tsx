@@ -291,3 +291,36 @@ describe("Administration server deletion", () => {
     expect(screen.getByRole("tab", { name: "Access (0)" })).toBeInTheDocument();
   });
 });
+
+describe("Administration group member viewer", () => {
+  it("opens an eye-icon popup and removes one member by user ID", async () => {
+    let storedGroup = group;
+    apiMock.mockReset();
+    apiMock.mockImplementation(async (path: string, init: RequestInit = {}) => {
+      if (path === "/auth/me") return { user: admin };
+      if (path === "/users") return { items: [admin, user] };
+      if (path === "/sftp-servers") return { items: [server] };
+      if (path === "/access-grants") return { items: [grant] };
+      if (path === "/groups/group-id" && init.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        expect(body.memberIds).toEqual([]);
+        storedGroup = { ...storedGroup, memberIds: [], version: 2 };
+        return storedGroup;
+      }
+      if (path === "/groups") return { items: [storedGroup] };
+      throw new Error(`Unexpected API request: ${path}`);
+    });
+
+    render(<AdminPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Groups (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "View Finance members" }));
+    const dialog = await screen.findByRole("dialog", { name: "Finance members" });
+    expect(within(dialog).getByText("Mock User")).toBeInTheDocument();
+    expect(within(dialog).getByText("user@gmail.com")).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove user@gmail.com from Finance" }));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/groups/group-id", expect.objectContaining({ method: "PATCH" })));
+    expect(await within(dialog).findByText("This group has no members.")).toBeInTheDocument();
+    expect(screen.getByText("Group member removed")).toBeInTheDocument();
+  });
+});

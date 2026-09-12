@@ -24,6 +24,10 @@ export type Task = {
   status: string;
   completionMode: string;
   filenameGlob?: string;
+  fileCheckIntervalMinutes: 5 | 10 | 30 | 60 | 1440;
+  lastCheckedAt?: string;
+  nextCheckAt?: string;
+  createdAt: string;
 };
 export type TaskDefinition = {
   id: string;
@@ -41,6 +45,8 @@ export type TaskDefinition = {
   dueOffsetMinutes: number;
   completionMode: string;
   filenameGlob?: string;
+  fileCheckIntervalMinutes: 5 | 10 | 30 | 60 | 1440;
+  lastCheckedAt?: string;
   nextRunAt?: string;
   lastGeneratedAt?: string;
   version: number;

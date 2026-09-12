@@ -5,6 +5,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import NetworkCheckIcon from "@mui/icons-material/NetworkCheck";
+import VisibilityIcon from "@mui/icons-material/Visibility";
 import {
   Alert,
   Autocomplete,
@@ -22,6 +23,7 @@ import {
   FormControl,
   FormControlLabel,
   FormGroup,
+  IconButton,
   InputLabel,
   MenuItem,
   Select,
@@ -30,6 +32,7 @@ import {
   Tab,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
 } from "@mui/material";
 import { FormEvent, useEffect, useState } from "react";
@@ -134,7 +137,7 @@ export default function AdminPage() {
           <Typography color="text.secondary">Manage accounts, SFTP connections, groups, and folder access.</Typography>
         </Box>
         {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
-        <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable">
+        <Tabs value={tab} onChange={(_, value) => { setTab(value); setError(""); }} variant="scrollable">
           <Tab label={`Users (${users.length})`} />
           <Tab label={`Servers (${servers.length})`} />
           <Tab label={`Access (${grants.length})`} />
@@ -984,6 +987,10 @@ function GroupsPanel({ groups, users, done, fail }: { groups: Group[]; users: Us
   const [editError, setEditError] = useState("");
   const [saving, setSaving] = useState(false);
   const [removingId, setRemovingId] = useState("");
+  const [viewing, setViewing] = useState<Group | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberError, setMemberError] = useState("");
+  const [removingMemberId, setRemovingMemberId] = useState("");
 
   function openCreate() {
     setCreateForm(blankGroup());
@@ -1057,6 +1064,42 @@ function GroupsPanel({ groups, users, done, fail }: { groups: Group[]; users: Us
     }
   }
 
+  function openMembers(group: Group) {
+    setViewing(group);
+    setMemberSearch("");
+    setMemberError("");
+    fail("");
+  }
+
+  function closeMembers() {
+    if (removingMemberId) return;
+    setViewing(null);
+    setMemberError("");
+    setMemberSearch("");
+  }
+
+  async function removeMember(userId: string) {
+    if (!viewing) return;
+    setMemberError("");
+    setRemovingMemberId(userId);
+    const updatedMembers = viewing.memberIds.filter((memberId) => memberId !== userId);
+    try {
+      const updated = await api<Group>(`/groups/${viewing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: viewing.name, description: viewing.description, memberIds: updatedMembers }),
+      });
+      setViewing(updated);
+      await done("Group member removed");
+    } catch (reason) {
+      setMemberError(errorMessage(reason, "Unable to remove group member"));
+    } finally {
+      setRemovingMemberId("");
+    }
+  }
+
+  const visibleMembers = users.filter((user) => viewing?.memberIds.includes(user.id))
+    .filter((user) => `${user.displayName} ${user.email}`.toLowerCase().includes(memberSearch.trim().toLowerCase()));
+
   return (
     <Stack spacing={2}>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }} justifyContent="space-between">
@@ -1078,6 +1121,9 @@ function GroupsPanel({ groups, users, done, fail }: { groups: Group[]; users: Us
                 <Typography color="text.secondary">{group.description || "No description"}</Typography>
                 <Typography variant="body2" color="text.secondary">{group.memberIds.length} member{group.memberIds.length === 1 ? "" : "s"}</Typography>
               </Box>
+              <Tooltip title="View group members">
+                <IconButton aria-label={`View ${group.name} members`} onClick={() => openMembers(group)}><VisibilityIcon /></IconButton>
+              </Tooltip>
               <Button startIcon={<EditIcon />} aria-label={`Edit ${group.name}`} onClick={() => openEdit(group)}>Edit</Button>
               <Button color="error" startIcon={removingId === group.id ? <BusyIcon /> : <DeleteIcon />} disabled={Boolean(removingId)} onClick={() => remove(group)}>Remove</Button>
             </Stack>
@@ -1119,6 +1165,29 @@ function GroupsPanel({ groups, users, done, fail }: { groups: Group[]; users: Us
           </DialogActions>
           {editError && <Alert severity="error" sx={{ mx: 3, mb: 2 }}>{editError}</Alert>}
         </Stack>
+      </Dialog>
+
+      <Dialog open={Boolean(viewing)} onClose={closeMembers} fullWidth maxWidth="sm">
+        <DialogTitle>{viewing?.name} members</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2}>
+            <TextField label="Search members" value={memberSearch} onChange={(event) => setMemberSearch(event.target.value)} />
+            {viewing?.memberIds.length === 0 && <Alert severity="info">This group has no members.</Alert>}
+            {viewing && viewing.memberIds.length > 0 && visibleMembers.length === 0 && <Alert severity="info">No members match this search.</Alert>}
+            {visibleMembers.map((user) => (
+              <Card key={user.id} variant="outlined">
+                <CardContent sx={{ py: 1.25, "&:last-child": { pb: 1.25 } }}>
+                  <Stack direction="row" spacing={1.5} alignItems="center">
+                    <Box flex={1}><Typography fontWeight={700}>{user.displayName}</Typography><Typography variant="body2" color="text.secondary">{user.email}</Typography></Box>
+                    <Tooltip title="Remove member"><IconButton color="error" aria-label={`Remove ${user.email} from ${viewing?.name || "group"}`} disabled={Boolean(removingMemberId)} onClick={() => removeMember(user.id)}>{removingMemberId === user.id ? <BusyIcon /> : <DeleteIcon />}</IconButton></Tooltip>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: "flex-start", px: 3 }}><Button onClick={closeMembers} disabled={Boolean(removingMemberId)}>Close</Button></DialogActions>
+        {memberError && <Alert severity="error" variant="filled" sx={{ mx: 3, mb: 2 }}>{memberError}</Alert>}
       </Dialog>
     </Stack>
   );

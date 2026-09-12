@@ -8,5 +8,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Full Material UI modal workflows can exceed Vitest's five-second
+    // default when every suite competes for CPU inside the Docker test image.
+    testTimeout: 15_000,
   },
 });

@@ -127,6 +127,22 @@ def test_admin_can_manage_groups_and_grants(client: TestClient, admin_headers: d
     )
     assert access.status_code == 200
     assert set(access.json()["permissions"]) >= {"LIST", "DOWNLOAD", "UPLOAD"}
+
+    removed_member = client.patch(
+        f"/api/v1/groups/{group.json()['id']}",
+        json={"name": "Finance", "description": "Finance users", "memberIds": []},
+        headers=admin_headers,
+    )
+    assert removed_member.status_code == 200
+    assert removed_member.json()["memberIds"] == []
+    recalculated = client.get(
+        f"/api/v1/users/{mock_user['id']}/effective-access",
+        params={"serverId": server["id"], "path": "/finance/month-end"},
+    )
+    assert recalculated.status_code == 200
+    assert all(source["id"] != grant.json()["id"] for source in recalculated.json()["sources"])
+    # Removing a group membership must not revoke unrelated direct-user grants.
+    assert set(recalculated.json()["permissions"]) >= {"LIST", "DOWNLOAD", "UPLOAD"}
     assert client.delete(f"/api/v1/access-grants/{grant.json()['id']}", headers=admin_headers).status_code == 204
 
 

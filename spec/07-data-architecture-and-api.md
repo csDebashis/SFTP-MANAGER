@@ -16,8 +16,8 @@ All IDs are server-generated UUIDv4 values. A user's ID is assigned during signu
 | `SftpServer` | `id`, `name`, `host`, `port`, `username`, `authType`, `encryptedCredential`, `rootPath`, `hostKeyFingerprint`, `enabled`, `timeouts`, `lastTest`, `version` |
 | `FolderGrant` | `id`, `principalType`, `principalId`, `serverId`, `canonicalPath`, `permissions`, `recursive`, `createdBy`, `createdAt`, `version` |
 | `FileUpload` | `id`, `userId`, `serverId`, `folderPath`, `filename`, `totalSize`, SFTP-confirmed `receivedSize`, `replace`, `status`, `createdAt`, `updatedAt` |
-| `TaskDefinition` | Fields defined in section 5.7 plus `occurrenceKey` generation metadata |
-| `TaskInstance` | `id`, `definitionId`, `definitionSnapshot`, `occurrenceKey`, `scheduledAt`, `dueAt`, `status`, `assignments`, `createdAt` |
+| `TaskDefinition` | Fields defined in section 5.7 plus `fileCheckIntervalMinutes`, `lastCheckedAt`, and occurrence-key generation metadata |
+| `TaskInstance` | `id`, `definitionId`, `definitionSnapshot`, `occurrenceKey`, `scheduledAt`, `dueAt`, `status`, `fileCheckIntervalMinutes`, `lastCheckedAt`, `nextCheckAt`, `assignments`, `createdAt` |
 | `TaskAssignment` | `userId`, `status`, `startedAt`, `completedAt`, `dismissedAt`, `dismissalReason`, `completedByEventId` |
 | `AuditEvent` | Fields defined in section 5.8 |
 
@@ -157,11 +157,12 @@ All endpoints are under `/api/v1`. JSON uses camelCase. Except for signup, login
 | `GET, POST /task-definitions` | List/create definitions | Scoped; create requires Admin or `MANAGE_TASKS` Manager |
 | `GET, PATCH /task-definitions/{id}` | Read/change definition | Scoped task authority |
 | `POST /task-definitions/{id}/disable` | Disable definition | Scoped task authority |
-| `GET /task-actions` | Dashboard/list assignments | Signed in, visibility-filtered |
-| `POST /task-actions/{id}/start` | Start own assignment | Assignee |
-| `POST /task-actions/{id}/complete` | Complete own assignment | Assignee |
-| `POST /task-actions/{id}/dismiss` | Dismiss with reason | Assignee |
-| `POST /task-actions/{id}/reopen` | Reopen assignment | Admin or scoped Manager |
+| `GET /tasks` | List assignments in urgency/recent-assignment order | Signed in, visibility-filtered |
+| `POST /tasks/{id}/start` | Start own assignment | Assignee |
+| `POST /tasks/{id}/complete` | Complete own assignment | Assignee |
+| `POST /tasks/{id}/dismiss` | Dismiss with reason | Assignee |
+| `POST /tasks/{id}/reopen` | Reopen assignment | Admin or scoped Manager |
+| `POST /tasks/{id}/check` | Force exact-folder validation for a matching-file assignment | Assignee, Admin, or scoped Manager |
 | `GET /audit-events` | Filter audit history | Visibility-filtered |
 | `GET /audit-events/export` | Export filtered CSV | Admin or Auditor |
 | `GET /dashboard` | Aggregate tasks, roots, activity, attention | Signed in |

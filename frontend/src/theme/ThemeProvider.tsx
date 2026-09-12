@@ -83,6 +83,15 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
               }),
             },
           },
+          MuiAlert: {
+            styleOverrides: {
+              root: ({ theme, ownerState }) => ownerState.severity === "error" ? {
+                border: `2px solid ${theme.palette.error.main}`,
+                boxShadow: `0 10px 28px ${alpha(theme.palette.error.main, 0.22)}`,
+                fontWeight: 700,
+              } : {},
+            },
+          },
           MuiCard: { styleOverrides: { root: { border: "1px solid #e2e8f0", boxShadow: "0 8px 30px rgba(31, 41, 55, 0.05)" } } },
         },
       }),

@@ -102,7 +102,7 @@ Authorization rules:
 - Profile mutations target `/users/{id}` using the immutable signup-assigned user ID. A non-Admin may target only their own ID and may not submit role or account-state changes.
 - Updated email addresses are trimmed, normalized to lowercase, validated, and remain globally unique. A conflict returns HTTP 409 and leaves the existing profile unchanged.
 - Changing a display name or email does not change the user ID or detach sessions, group memberships, folder grants, tasks, uploads, or audit ownership. The new email becomes the login identifier immediately.
-- Profile changes are audited against the affected user ID. The UI displays the immutable user ID for clarity, shows pending progress, keeps errors with the form, and shows a two-second success notification after saving.
+- Profile changes are audited against the affected user ID. Profile & Security initially displays read-only account/security cards; **Edit account details** and **Change password** each open a dedicated modal rather than exposing an open form. A modal shows pending progress, keeps highlighted API/validation errors below its actions without closing, and closes after success while a success notification remains for two seconds. The UI displays the immutable user ID for clarity.
 
 ### 5.6 Users, groups, and access management
 
@@ -121,6 +121,11 @@ Administration edit interactions are consistent across users, SFTP servers, cred
 - The Servers, Access, and Groups tabs show their existing records by default and expose prominent **Add SFTP server**, **Add folder grant**, and **Create group** buttons. Each button opens a dedicated modal create form; create forms are not expanded inline in the list.
 - Successful creation closes the modal, immediately refreshes the corresponding list and count, and shows the same two-second success notification used by edit flows.
 - Group create and edit forms select members through a searchable multi-select dropdown that supports selecting and removing multiple users without rendering a checkbox for every user on the page.
+- Every group row has a focusable eye/view action that opens a searchable member
+  dialog. The dialog resolves each immutable member ID to current display name
+  and email and permits individual membership removal with a spinner. A failure
+  remains in that dialog; success refreshes the group count/list and recalculates
+  access immediately without closing the viewer.
 - Selecting **Edit** opens a modal form populated with the current record; edit fields must not replace or reuse an inline create form.
 - Each SFTP server row provides a **Delete** action. Its confirmation modal states that access grants, tasks, credentials, and unfinished upload-session records will be removed while audit history and remote files remain. Success closes the modal, refreshes the Servers and Access counts, and uses the shared two-second success notification; failure remains inside the modal.
 - Opening the modal and retrying a submission clear any stale error from the prior attempt.
