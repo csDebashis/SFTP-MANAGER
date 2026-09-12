@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.7
+
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-alpine AS dependencies
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM dependencies AS test
+
+COPY . .
+ENV CI=true
+CMD ["npm", "test", "--", "--run"]
+
+FROM dependencies AS build
+
+COPY . .
+ARG BACKEND_INTERNAL_URL=http://backend:8000
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
+RUN npm run build
+
+FROM node:${NODE_VERSION}-alpine AS runtime
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+RUN addgroup --system --gid 10001 app \
+    && adduser --system --uid 10001 --ingroup app app
+
+WORKDIR /app
+COPY --from=build --chown=app:app /app/package.json /app/package-lock.json ./
+RUN npm ci --omit=dev \
+    && npm cache clean --force
+COPY --from=build --chown=app:app /app/next.config.mjs ./next.config.mjs
+COPY --from=build --chown=app:app /app/.next ./.next
+COPY --from=build --chown=app:app /app/public ./public
+
+USER app
+EXPOSE 3000
+
+CMD ["npm", "run", "start"]

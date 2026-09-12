@@ -1,0 +1,99 @@
+name: sftp-manager
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runtime
+    image: sftp-manager-backend:local
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite+aiosqlite:////data/sftp-manager.db
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      APP_CREDENTIAL_ENCRYPTION_KEY_FILE: /run/secrets/credential_encryption_key
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?Set BOOTSTRAP_ADMIN_EMAIL}
+      BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/bootstrap_admin_password
+      PASSWORD_RESET_ENABLED: ${PASSWORD_RESET_ENABLED:-false}
+      TRUSTED_ORIGINS: ${PUBLIC_URL:-http://localhost:3000}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      MOCK_SFTP_ROOT: /data/mock-sftp
+      APP_LOG_DIR: /var/log/sftp-manager
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_MAX_BYTES: ${LOG_MAX_BYTES:-10485760}
+      LOG_BACKUP_COUNT: ${LOG_BACKUP_COUNT:-5}
+    secrets:
+      - session_signing_key
+      - credential_encryption_key
+      - bootstrap_admin_password
+    volumes:
+      - sqlite_data:/data
+      - application_logs:/var/log/sftp-manager
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - app_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    image: sftp-manager-frontend:local
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      BACKEND_INTERNAL_URL: http://backend:8000
+      UPLOAD_PROXY_MAX_BODY_SIZE: ${UPLOAD_PROXY_MAX_BODY_SIZE:-8mb}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=128m,uid=10001,gid=10001,mode=0755
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - app_network
+
+volumes:
+  sqlite_data:
+  application_logs:
+
+networks:
+  app_network:
+    driver: bridge
+
+secrets:
+  session_signing_key:
+    file: ./deploy/secrets/session_signing_key
+  credential_encryption_key:
+    file: ./deploy/secrets/credential_encryption_key
+  bootstrap_admin_password:
+    file: ./deploy/secrets/bootstrap_admin_password

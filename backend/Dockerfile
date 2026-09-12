@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+
+ARG PYTHON_VERSION=3.12
+
+FROM python:${PYTHON_VERSION}-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/opt/venv/bin:${PATH}"
+
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --home-dir /app app \
+    && python -m venv /opt/venv \
+    && mkdir -p /app /data /var/log/sftp-manager \
+    && chown -R app:app /app /data /var/log/sftp-manager /opt/venv
+
+WORKDIR /app
+
+FROM base AS build
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+COPY app/ ./app/
+
+RUN pip install --upgrade pip build \
+    && pip wheel --wheel-dir /wheels .
+
+FROM build AS test
+
+RUN pip install --no-cache-dir ".[test]"
+COPY tests/ ./tests/
+COPY alembic.ini ./
+COPY migrations/ ./migrations/
+
+USER app
+CMD ["pytest", "-q"]
+
+FROM base AS runtime
+
+COPY --from=build /wheels/ /wheels/
+RUN pip install --no-cache-dir /wheels/* \
+    && rm -rf /wheels
+
+COPY --chown=app:app alembic.ini ./
+COPY --chown=app:app migrations/ ./migrations/
+
+USER app
+EXPOSE 8000
+
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]

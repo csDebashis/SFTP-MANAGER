@@ -1,0 +1,35 @@
+export type User = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: "ADMIN" | "MANAGER" | "USER" | "AUDITOR";
+  state: string;
+  timezone: string;
+  version: number;
+};
+
+export type Root = { serverId: string; serverName: string; path: string; permissions: string[] };
+export type FileItem = { name: string; path: string; type: "file" | "folder"; size: number; modifiedAt: number };
+export type Task = { id: string; title: string; instructions: string; serverId: string; targetPath: string; assigneeId: string; dueAt: string; status: string; completionMode: string; filenameGlob?: string };
+export type AuditEvent = {
+  id: string;
+  timestamp: string;
+  requestId: string;
+  actorId?: string;
+  actorDisplay: string;
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  serverId?: string;
+  serverName?: string;
+  path?: string;
+  itemName?: string;
+  folderPath?: string;
+  sourceIp?: string;
+  clientDetails?: string;
+  outcome: string;
+  detail: Record<string, unknown>;
+};
+export type Server = { id: string; name: string; description: string; host: string; port: number; username: string; authType: string; rootPath: string; hostKeyFingerprint: string; adapterType: string; enabled: boolean; credentialConfigured: boolean; lastTest?: { success: boolean; message: string }; version: number };
+export type Grant = { id: string; principalType: string; principalId: string; principalName?: string; serverId: string; serverName?: string; path: string; permissions: string[]; recursive: boolean; version: number };
+export type Group = { id: string; name: string; description: string; memberIds: string[]; version: number };
