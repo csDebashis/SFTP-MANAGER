@@ -27,8 +27,10 @@ The authenticated home page contains:
 Each task card displays title, target SFTP server/folder, due time, status,
 instructions summary, and a primary action. Once at least half of the interval
 from `scheduledAt` to `dueAt` has elapsed, unresolved work uses an orange warning
-treatment and the text **half time elapsed**. Once overdue, it uses a strong red
-error highlight. The primary action for folder/file work opens the exact SFTP
+treatment without adding a separate visible half-time status or message. The
+card continues to show only the work-item lifecycle status and an explicitly
+labeled due date and time; a non-visual accessible name identifies the urgency.
+Once overdue, it uses a strong red error highlight. The primary action for folder/file work opens the exact SFTP
 folder configured by the task. An unresolved matching-file card also provides a
 spinner-backed **Check folder** action and displays its last-check timestamp. An
 assigned user may dismiss an assignment only after entering a reason between 3

@@ -65,7 +65,10 @@ describe("Dashboard task urgency", () => {
     expect(overdueTitle.compareDocumentPosition(externalTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(overdueTitle.closest(".MuiCard-root")).toHaveAttribute("data-task-tone", "overdue");
     expect(externalTitle.closest(".MuiCard-root")).toHaveAttribute("data-task-tone", "halfway");
-    expect(within(externalTitle.closest(".MuiCard-root")!).getByText(/half time elapsed/i)).toBeInTheDocument();
+    expect(within(externalTitle.closest(".MuiCard-root")!).getByText("PENDING")).toBeInTheDocument();
+    expect(within(externalTitle.closest(".MuiCard-root")!).queryByText(/half time elapsed/i)).not.toBeInTheDocument();
+    expect(within(externalTitle.closest(".MuiCard-root")!).getByText(/^Due /)).toBeInTheDocument();
+    expect(externalTitle.closest(".MuiCard-root")).toHaveAccessibleName(/due soon/i);
 
     fireEvent.click(within(externalTitle.closest(".MuiCard-root")!).getByRole("button", { name: "Check folder" }));
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/tasks/matching/check", { method: "POST" }));

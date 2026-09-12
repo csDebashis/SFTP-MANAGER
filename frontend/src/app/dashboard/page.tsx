@@ -20,6 +20,13 @@ function taskTone(task: Task, now = Date.now()): "overdue" | "halfway" | "normal
   return due > scheduled && now >= scheduled + (due - scheduled) / 2 ? "halfway" : "normal";
 }
 
+function taskUrgencyLabel(task: Task, tone: ReturnType<typeof taskTone>): string {
+  if (!["PENDING", "IN_PROGRESS", "OVERDUE"].includes(task.status)) return "resolved";
+  if (tone === "overdue") return "overdue";
+  if (tone === "halfway") return "due soon";
+  return "on schedule";
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState("");
@@ -60,9 +67,9 @@ export default function DashboardPage() {
                   const tone = taskTone(task);
                   return (
                     <Grid item xs={12} md={6} key={task.id}>
-                      <Card data-task-tone={tone} sx={(theme) => tone === "overdue" ? { border: `2px solid ${theme.palette.error.main}`, backgroundColor: alpha(theme.palette.error.main, 0.1) } : tone === "halfway" ? { border: `2px solid ${theme.palette.warning.main}`, backgroundColor: alpha(theme.palette.warning.main, 0.08) } : {}}>
+                      <Card aria-label={`${task.title}; ${task.status}; ${taskUrgencyLabel(task, tone)}; due ${new Date(task.dueAt).toLocaleString()}`} data-task-tone={tone} sx={(theme) => tone === "overdue" ? { border: `2px solid ${theme.palette.error.main}`, backgroundColor: alpha(theme.palette.error.main, 0.1) } : tone === "halfway" ? { border: `2px solid ${theme.palette.warning.main}`, backgroundColor: alpha(theme.palette.warning.main, 0.08) } : {}}>
                         <CardContent><Stack spacing={1.5}>
-                          <Stack direction="row" justifyContent="space-between" spacing={1}><Typography variant="h6">{task.title}</Typography><Chip label={tone === "halfway" ? `${task.status} · half time elapsed` : task.status} color={tone === "overdue" ? "error" : tone === "halfway" ? "warning" : "primary"} size="small" /></Stack>
+                          <Stack direction="row" justifyContent="space-between" spacing={1}><Typography variant="h6">{task.title}</Typography><Chip label={task.status} color={tone === "overdue" ? "error" : tone === "halfway" ? "warning" : "primary"} size="small" /></Stack>
                           <Typography color="text.secondary">{task.instructions}</Typography>
                           <Typography variant="caption">{task.serverName || task.serverId} · {task.targetPath}</Typography>
                           <Typography variant="caption">Due {new Date(task.dueAt).toLocaleString()}</Typography>

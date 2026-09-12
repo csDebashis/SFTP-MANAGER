@@ -120,6 +120,13 @@ function taskTone(task: Task, now = Date.now()): "overdue" | "halfway" | "normal
   return due > scheduled && now >= scheduled + (due - scheduled) / 2 ? "halfway" : "normal";
 }
 
+function taskUrgencyLabel(task: Task, tone: ReturnType<typeof taskTone>): string {
+  if (!activeTask(task)) return "resolved";
+  if (tone === "overdue") return "overdue";
+  if (tone === "halfway") return "due soon";
+  return "on schedule";
+}
+
 function TaskScheduleFields({ form, change, users, groups, servers }: {
   form: TaskForm;
   change: (values: Partial<TaskForm>) => void;
@@ -421,10 +428,10 @@ export default function TasksPage() {
                     <TableBody>{sortedTasks.map((task) => {
                       const tone = taskTone(task);
                       return (
-                        <TableRow key={task.id} data-testid={`task-row-${task.id}`} data-task-tone={tone} sx={(theme) => tone === "overdue" ? { backgroundColor: alpha(theme.palette.error.main, 0.13), borderLeft: `5px solid ${theme.palette.error.main}` } : tone === "halfway" ? { backgroundColor: alpha(theme.palette.warning.main, 0.12), borderLeft: `5px solid ${theme.palette.warning.main}` } : {}}>
+                        <TableRow key={task.id} aria-label={`${task.title}; ${task.status}; ${taskUrgencyLabel(task, tone)}; due ${new Date(task.dueAt).toLocaleString()}`} data-testid={`task-row-${task.id}`} data-task-tone={tone} sx={(theme) => tone === "overdue" ? { backgroundColor: alpha(theme.palette.error.main, 0.13), borderLeft: `5px solid ${theme.palette.error.main}` } : tone === "halfway" ? { backgroundColor: alpha(theme.palette.warning.main, 0.12), borderLeft: `5px solid ${theme.palette.warning.main}` } : {}}>
                           <TableCell><Typography fontWeight={750}>{task.title}</Typography><Typography variant="body2" color="text.secondary">{task.instructions || "No instructions"}</Typography></TableCell>
                           <TableCell><Typography fontWeight={650}>{task.serverName || task.serverId}</Typography><Typography variant="caption" color="text.secondary">{task.targetPath}</Typography></TableCell>
-                          <TableCell><Stack spacing={0.5} alignItems="flex-start"><Chip size="small" label={tone === "halfway" ? `${task.status} · half time elapsed` : task.status} color={tone === "overdue" ? "error" : task.status === "COMPLETED" ? "success" : tone === "halfway" ? "warning" : "primary"} /><Typography variant="body2">{new Date(task.dueAt).toLocaleString()}</Typography></Stack></TableCell>
+                          <TableCell><Stack spacing={0.5} alignItems="flex-start"><Chip size="small" label={task.status} color={tone === "overdue" ? "error" : task.status === "COMPLETED" ? "success" : tone === "halfway" ? "warning" : "primary"} /><Typography variant="body2">Due {new Date(task.dueAt).toLocaleString()}</Typography></Stack></TableCell>
                           <TableCell>{task.completionMode === "MATCHING_UPLOAD" ? <Stack spacing={0.25}><Typography variant="body2">{task.filenameGlob}</Typography><Typography variant="caption" color="text.secondary">{checkIntervalLabel(task.fileCheckIntervalMinutes)}</Typography><Typography variant="caption" color="text.secondary">Last checked: {task.lastCheckedAt ? new Date(task.lastCheckedAt).toLocaleString() : "Not checked"}</Typography></Stack> : <Typography color="text.secondary">Manual completion</Typography>}</TableCell>
                           <TableCell align="right"><Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
                             {task.completionMode === "MATCHING_UPLOAD" && activeTask(task) && <Button size="small" startIcon={<FolderOpenIcon />} onClick={() => router.push(`/files?serverId=${task.serverId}&path=${encodeURIComponent(task.targetPath)}`)}>Open folder</Button>}

@@ -103,9 +103,11 @@ Task behavior:
   (oldest due first), then unresolved items by most recently assigned, followed
   by resolved history. Overdue rows/cards use a strong error-color border and
   background. Once half of the scheduled-to-due interval has elapsed, unresolved
-  work uses an orange warning background/border and a **half time elapsed** text
-  label. Status remains present in text so urgency is never communicated by
-  color alone. Work-item rows show both SFTP server name and target folder.
+  work uses an orange warning background/border without displaying a separate
+  half-time message. Rows and cards show the lifecycle status plus an explicitly
+  labeled due date and time, and expose the urgency through a non-visual
+  accessible name so it is not communicated by color alone. Work-item rows show
+  both SFTP server name and target folder.
 - Dismissal requires a reason. Completion, dismissal, reopening, overdue transition, and automatic matching are audited.
 - Editing a definition affects future instances only. Existing instances retain a snapshot of the definition fields needed for display and routing.
 - Disabling a definition stops future generation but does not remove existing assignments.

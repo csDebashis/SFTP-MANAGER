@@ -20,8 +20,8 @@ module when its release evidence or acceptance contract changes.
   last/next-check timestamps, forced user refresh, absent-file overdue behavior,
   and recovery from a temporary SFTP scan failure.
 - Shared group work-item consistency under member add/remove, automatic filename
-  matching, rejection of manual matching-file completion, dismissal, half-time
-  urgency, due-frequency bounds, schedule deletion, and overdue transitions.
+  matching, rejection of manual matching-file completion, dismissal, urgency
+  thresholds, due-frequency bounds, schedule deletion, and overdue transitions.
 - Audit visibility, event immutability, metadata redaction, and CSV escaping.
 - SQLAlchemy repository transactions, constraints, migration behavior, and shared contract suite.
 
@@ -53,10 +53,11 @@ Run against a disposable SFTP server and cover:
 ### 14.4 UI and accessibility tests
 
 - Signup, pending approval, approval, login, logout, reset, password change, and self-service display-name/email updates by immutable user ID.
-- Dashboard/task ordering (overdue then recent pending), orange half-time and red
-  overdue treatments with accessible text, matching-file refresh, last-check
-  display, exact SFTP-folder CTA routing, dismiss reason validation, SFTP server
-  and folder columns, folder cards, and recent activity.
+- Dashboard/task ordering (overdue then recent pending), orange due-soon and red
+  overdue treatments without a visible half-time message, lifecycle status,
+  labeled due date/time, non-visual accessible urgency, matching-file refresh,
+  last-check display, exact SFTP-folder CTA routing, dismiss reason validation,
+  SFTP server and folder columns, folder cards, and recent activity.
 - Task-definition add/edit modal flows, Repeat choices, conditional
   daily/weekly/monthly fields, matching-file interval validation, compact
   user/group assignee selection, due-frequency validation, schedule table,
@@ -102,7 +103,7 @@ Run against a disposable SFTP server and cover:
 | `AC-01` | A visitor can sign up, remains pending, and cannot access application data until an Admin approves the account. |
 | `AC-01A` | Signup assigns an immutable UUID user ID. A user can update their own display name and unique normalized email without changing that ID or losing sessions, groups, grants, tasks, uploads, or audit attribution; every user-related mutation targets the ID, and only Admins may change another user or role/state. |
 | `AC-02` | Role-based navigation and backend authorization expose Admin features only to Admins and scoped task management only to eligible Managers. |
-| `AC-03` | A definition creates no visible work before its scheduled occurrence. At occurrence time, dashboard and task lists show authorized direct/current-group work, order overdue work first and then newest unresolved work, turn orange with text after half the due window and red when overdue, and show all accessible SFTP roots. |
+| `AC-03` | A definition creates no visible work before its scheduled occurrence. At occurrence time, dashboard and task lists show authorized direct/current-group work, order overdue work first and then newest unresolved work, display lifecycle status and labeled due date/time, turn orange without a visible half-time message after half the due window and red when overdue, expose urgency accessibly, and show all accessible SFTP roots. |
 | `AC-04` | Selecting a task CTA or folder card opens the exact authorized folder/page and never exposes an unauthorized ancestor. |
 | `AC-05` | Users can browse, upload, download, create, rename, move, replace, and delete only when the required folder permissions are effective; multiple uploads support file-picker and drag-and-drop selection on the directory-listing card, concurrent same/different-folder background operation across menu navigation, bottom-right progress with expanded per-file controls and a minimized single-row aggregate progress plus batch pause/resume/cancel controls, bounded direct-to-SFTP chunks, progress calculated only from remotely written and size-verified bytes, cancellation cleanup, offset-based resume after pause or failure, same-target conflict protection, and files larger than the frontend proxy's former 10 MiB default. |
 | `AC-06` | An Admin can configure password/private-key SFTP servers without entering a host fingerprint; a successful initial connection automatically pins the discovered key, closes the form, and refreshes the server list, while a failed connection saves nothing. An Admin can also confirm server deletion, which atomically removes its credentials, access grants, tasks, and unfinished upload sessions while retaining audit history and remote files. |

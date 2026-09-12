@@ -168,6 +168,10 @@ describe("Assigned task prioritization and folder refresh", () => {
     expect(within(rows[1]).getByText("Recent pending")).toBeInTheDocument();
     expect(rows[0]).toHaveAttribute("data-task-tone", "overdue");
     expect(rows[1]).toHaveAttribute("data-task-tone", "halfway");
+    expect(within(rows[1]).getByText("PENDING")).toBeInTheDocument();
+    expect(within(rows[1]).queryByText(/half time elapsed/i)).not.toBeInTheDocument();
+    expect(within(rows[1]).getByText(/^Due /)).toBeInTheDocument();
+    expect(rows[1]).toHaveAccessibleName(/due soon/i);
     expect(within(rows[0]).getByText("Finance SFTP")).toBeInTheDocument();
     expect(within(rows[0]).queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
     fireEvent.click(within(rows[0]).getByRole("button", { name: "Open folder" }));
