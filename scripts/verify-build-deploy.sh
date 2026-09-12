@@ -51,7 +51,6 @@ docker compose version >/dev/null
 
 require_file backend/pyproject.toml
 require_file backend/app/main.py
-require_file backend/alembic.ini
 require_file frontend/package.json
 require_file frontend/package-lock.json
 
@@ -114,7 +113,7 @@ fi
 
 printf '%s\n' 'Verifying the host-mounted SQLite database...'
 docker compose exec -T backend python -c \
-  "import sqlite3; from pathlib import Path; path = Path('/data/sftp-manager.db'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty SQLite database: {path}'; connection = sqlite3.connect(path); result = connection.execute('PRAGMA integrity_check').fetchone()[0]; connection.close(); assert result == 'ok', f'SQLite integrity check failed: {result}'"
+  "import sqlite3; from pathlib import Path; from app.models import CURRENT_SCHEMA_BASELINE; path = Path('/data/sftp-manager.db'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty SQLite database: {path}'; connection = sqlite3.connect(path); integrity = connection.execute('PRAGMA integrity_check').fetchone()[0]; tables = {row[0] for row in connection.execute(\"SELECT name FROM sqlite_master WHERE type = 'table'\")}; baseline = connection.execute('SELECT version FROM schema_baseline WHERE id = 1').fetchone(); connection.close(); assert integrity == 'ok', f'SQLite integrity check failed: {integrity}'; assert baseline == (CURRENT_SCHEMA_BASELINE,), f'Unexpected schema baseline: {baseline}'; assert 'alembic_version' not in tables, 'Alembic metadata must not exist in a baseline database'"
 if [ ! -s "$database_dir/sftp-manager.db" ]; then
   printf 'Missing or empty host SQLite database: %s\n' "$database_dir/sftp-manager.db" >&2
   exit 1

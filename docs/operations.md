@@ -76,7 +76,8 @@ rotations are removed.
 - `/api/v1/health/live` confirms the API event loop responds.
 - `/api/v1/health/ready` confirms database and scheduler readiness without
   requiring every remote SFTP server to be online.
-- Alembic migrations run before Uvicorn accepts traffic.
+- FastAPI startup creates an empty baseline schema or validates an existing
+  current-baseline database before readiness succeeds.
 - The backend runs one worker so APScheduler has one owner and SQLite writes
   remain coordinated.
 
@@ -89,8 +90,10 @@ Compose mounts the Git-ignored host directory
 `/Users/debchowd/SFTP-MANAGER/db` at `/data` in the backend. The active database
 is therefore available on the host as `db/sftp-manager.db` and in the container
 as `/data/sftp-manager.db`. An empty directory is initialized at the current
-schema baseline during backend startup. Pre-baseline development databases are
-not imported or upgraded, and this deployment does not provide a database
+schema baseline during backend startup. The database stores a singleton
+baseline marker and must match the current table/column shape when reopened.
+Pre-baseline development databases are not imported or upgraded, no migration
+tooling is installed, and this deployment does not provide a database
 backup/restore workflow. Remote SFTP file contents are not stored in SQLite.
 
 Application logs in the host `logs` directory and SQLite in the host `db`

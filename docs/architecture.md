@@ -41,11 +41,12 @@ deployment.
 - `app/logging_config.py` configures redacted operational logging. It never
   replaces the append-only business audit trail.
 
-Alembic migrations in `backend/migrations/versions` are the only supported way
-to initialize and change the production schema. Version 1.2 is the baseline;
-new installations initialize an empty database at the current head and do not
-upgrade pre-baseline development data. Add a forward migration whenever a
-persisted model changes after this baseline.
+The SQLAlchemy models are the authoritative v1.2 schema baseline. On startup,
+`Database.initialize()` creates every table and a singleton baseline marker for
+an empty database. An existing database must have the current marker and exact
+table/column shape or startup fails. There is no Alembic dependency or
+incremental migration path; after an intentional model-baseline change,
+operators stop the stack and clear the disposable host `db` directory.
 
 ## Request and authorization flow
 
@@ -97,5 +98,7 @@ When changing behavior:
 1. Update the relevant domain module linked from `SPEC.md`.
 2. Preserve UUID-based relationships and backend authorization.
 3. Add focused backend and/or frontend tests, including failure behavior.
-4. Add an Alembic migration for persisted-model changes after the v1.2 baseline.
+4. Update the schema-baseline identifier and baseline contract tests when a
+   persisted model changes; start development deployments with an empty `db`
+   directory after stopping the stack.
 5. Run `./scripts/verify-build-deploy.sh --verify-only` before review.

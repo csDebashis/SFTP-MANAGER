@@ -10,6 +10,9 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, Stri
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
+CURRENT_SCHEMA_BASELINE = "1.2"
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -20,6 +23,15 @@ def new_id() -> str:
 
 class Base(DeclarativeBase):
     pass
+
+
+class SchemaBaseline(Base):
+    """Singleton marker identifying the non-migrating application schema."""
+
+    __tablename__ = "schema_baseline"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class User(Base):

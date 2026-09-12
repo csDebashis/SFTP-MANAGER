@@ -23,7 +23,9 @@ module when its release evidence or acceptance contract changes.
   matching, rejection of manual matching-file completion, dismissal, urgency
   thresholds, due-frequency bounds, schedule deletion, and overdue transitions.
 - Audit visibility, event immutability, metadata redaction, and CSV escaping.
-- SQLAlchemy repository transactions, constraints, fresh baseline initialization, and shared contract suite.
+- SQLAlchemy repository transactions, constraints, fresh baseline initialization,
+  baseline marker/table/column validation, incompatible-database rejection, and
+  shared contract suite.
 
 ### 14.2 Integration tests
 
@@ -87,16 +89,21 @@ Run against a disposable SFTP server and cover:
 
 ### 14.5 Operational and security tests
 
-- Startup rejects unsafe/missing configuration, an unwritable database path, and incompatible schema versions.
+- Startup rejects unsafe/missing configuration, an unwritable database path,
+  and databases whose marker or table/column shape differs from the current
+  non-migrating schema baseline.
 - Operational logging tests cover every supported severity, HTTP status mapping, valid JSON-lines output, request-ID/route correlation, rotation settings, persistent container filesystem output, and exclusion of query strings, payloads, credentials, raw exceptions, IP addresses, and client metadata.
 - Compose deployment tests verify that `/var/log/sftp-manager/application.log`
   is the same non-empty file exposed in the Git-ignored host
   `/Users/debchowd/SFTP-MANAGER/logs` directory, and that
   `/data/sftp-manager.db` is the same valid SQLite database exposed in the
-  Git-ignored host `/Users/debchowd/SFTP-MANAGER/db` directory.
+  Git-ignored host `/Users/debchowd/SFTP-MANAGER/db` directory with the current
+  baseline marker and no Alembic metadata table.
 - Health endpoints and metrics reflect scheduler and remote-server failures correctly.
 - Restart and container replacement preserve SQLite records and do not affect remote files.
-- Fresh-start tests initialize the current schema in an empty host `db` directory without requiring import or migration of pre-baseline development data.
+- Fresh-start tests initialize the complete current schema and baseline marker
+  in an empty host `db` directory, preserve data when reopening the same
+  baseline, and reject pre-baseline databases without running migrations.
 - Concurrent-write tests exercise the busy timeout, transaction rollback, task occurrence uniqueness, and idempotency uniqueness.
 - Brute-force, session fixation, CSRF, traversal, malicious filename, oversized upload, CSV injection, stored/reflected XSS, and secret-leak tests.
 - Dependency, static-analysis, and container-image scans.

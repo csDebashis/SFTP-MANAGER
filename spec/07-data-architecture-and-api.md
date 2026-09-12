@@ -20,7 +20,7 @@ All IDs are server-generated UUIDv4 values. A user's ID is assigned during signu
 | `TaskInstance` | `id`, `definitionId`, `occurrenceKey`, `scheduledAt`, `dueAt`, exactly one of `assigneeUserId`/`assigneeGroupId`, definition display/routing snapshot, `status`, `fileCheckIntervalMinutes`, `lastCheckedAt`, `nextCheckAt`, `createdAt` |
 | `AuditEvent` | Fields defined in section 5.8 |
 
-Repository contracts must exist for every entity category and expose only domain operations, not storage-specific queries. Services depend on repository protocols/interfaces through dependency injection. SQLAlchemy repositories use explicit SQLite transactions so changes to multiple related records either commit fully or roll back fully. Alembic owns all schema changes.
+Repository contracts must exist for every entity category and expose only domain operations, not storage-specific queries. Services depend on repository protocols/interfaces through dependency injection. SQLAlchemy repositories use explicit SQLite transactions so changes to multiple related records either commit fully or roll back fully. The current SQLAlchemy metadata is the authoritative schema baseline; no migration framework is used.
 
 ## 7. System architecture
 
@@ -76,8 +76,6 @@ SFTP-MANAGER/
 ├── backend/
 │   ├── Dockerfile
 │   ├── pyproject.toml
-│   ├── alembic.ini
-│   ├── migrations/
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── api/                 # FastAPI routers and wire schemas

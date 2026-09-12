@@ -66,7 +66,10 @@ rotation. Operational logs never replace the immutable SQLite audit history.
 
 Compose mounts durable application data from the Git-ignored host directory
 `/Users/debchowd/SFTP-MANAGER/db`; the active database is
-`./db/sftp-manager.db`.
+`./db/sftp-manager.db`. An empty database is created directly from the current
+SQLAlchemy schema baseline. The backend has no Alembic dependency or migration
+scripts; incompatible databases are rejected and may be replaced with a fresh
+database after stopping the stack.
 
 ## Documentation
 
