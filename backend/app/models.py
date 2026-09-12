@@ -148,7 +148,8 @@ class TaskDefinition(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     server_id: Mapped[str] = mapped_column(ForeignKey("sftp_servers.id", ondelete="CASCADE"), index=True)
     target_path: Mapped[str] = mapped_column(String(1024))
-    assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    assignee_group_id: Mapped[str | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), nullable=True, index=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     schedule_type: Mapped[str] = mapped_column(String(16), default="ONCE")
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -173,6 +174,7 @@ class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (
         Index("ix_task_assignee_due", "assignee_id", "due_at"),
+        Index("ix_task_group_due", "assignee_group_id", "due_at"),
         UniqueConstraint("occurrence_key"),
     )
 
@@ -184,7 +186,8 @@ class Task(Base):
     instructions: Mapped[str] = mapped_column(Text, default="")
     server_id: Mapped[str] = mapped_column(ForeignKey("sftp_servers.id", ondelete="RESTRICT"), index=True)
     target_path: Mapped[str] = mapped_column(String(1024))
-    assignee_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    assignee_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True)
+    assignee_group_id: Mapped[str | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), nullable=True, index=True)
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)

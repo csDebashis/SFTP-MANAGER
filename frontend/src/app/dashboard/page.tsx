@@ -13,6 +13,13 @@ import type { AuditEvent, Root, Task } from "@/types";
 
 type Dashboard = { tasks: Task[]; roots: Root[]; recentActivity: AuditEvent[]; pendingApprovals: number };
 
+function taskTone(task: Task, now = Date.now()): "overdue" | "halfway" | "normal" {
+  const due = new Date(task.dueAt).getTime();
+  if (task.status === "OVERDUE" || due < now) return "overdue";
+  const scheduled = new Date(task.scheduledAt || task.createdAt).getTime();
+  return due > scheduled && now >= scheduled + (due - scheduled) / 2 ? "halfway" : "normal";
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState("");
@@ -50,13 +57,14 @@ export default function DashboardPage() {
             <Section title="Action required" icon={<AssignmentLateIcon color="primary" />}>
               <Grid container spacing={2}>
                 {data.tasks.length === 0 ? <Empty text="No pending actions." /> : data.tasks.map((task) => {
-                  const dueSoon = task.status !== "OVERDUE" && new Date(task.dueAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000;
+                  const tone = taskTone(task);
                   return (
                     <Grid item xs={12} md={6} key={task.id}>
-                      <Card data-task-tone={task.status === "OVERDUE" ? "overdue" : dueSoon ? "due-soon" : "normal"} sx={(theme) => task.status === "OVERDUE" ? { border: `2px solid ${theme.palette.error.main}`, backgroundColor: alpha(theme.palette.error.main, 0.1) } : dueSoon ? { border: `2px solid ${theme.palette.warning.main}`, backgroundColor: alpha(theme.palette.warning.main, 0.08) } : {}}>
+                      <Card data-task-tone={tone} sx={(theme) => tone === "overdue" ? { border: `2px solid ${theme.palette.error.main}`, backgroundColor: alpha(theme.palette.error.main, 0.1) } : tone === "halfway" ? { border: `2px solid ${theme.palette.warning.main}`, backgroundColor: alpha(theme.palette.warning.main, 0.08) } : {}}>
                         <CardContent><Stack spacing={1.5}>
-                          <Stack direction="row" justifyContent="space-between" spacing={1}><Typography variant="h6">{task.title}</Typography><Chip label={task.status} color={task.status === "OVERDUE" ? "error" : dueSoon ? "warning" : "primary"} size="small" /></Stack>
+                          <Stack direction="row" justifyContent="space-between" spacing={1}><Typography variant="h6">{task.title}</Typography><Chip label={tone === "halfway" ? `${task.status} · half time elapsed` : task.status} color={tone === "overdue" ? "error" : tone === "halfway" ? "warning" : "primary"} size="small" /></Stack>
                           <Typography color="text.secondary">{task.instructions}</Typography>
+                          <Typography variant="caption">{task.serverName || task.serverId} · {task.targetPath}</Typography>
                           <Typography variant="caption">Due {new Date(task.dueAt).toLocaleString()}</Typography>
                           {task.lastCheckedAt && <Typography variant="caption" color="text.secondary">Last folder check {new Date(task.lastCheckedAt).toLocaleString()}</Typography>}
                           <Stack direction="row" spacing={1} flexWrap="wrap">

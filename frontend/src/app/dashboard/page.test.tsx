@@ -22,6 +22,8 @@ const task = (changes: Record<string, unknown>) => ({
   serverId: "server-id",
   targetPath: "/incoming",
   assigneeId: "user-id",
+  assigneeType: "USER",
+  scheduledAt: "2026-09-12T08:00:00Z",
   dueAt: "2026-09-14T10:00:00Z",
   status: "PENDING",
   completionMode: "MANUAL",
@@ -44,6 +46,7 @@ describe("Dashboard task urgency", () => {
       id: "matching",
       title: "External delivery",
       dueAt: "2026-09-12T11:00:00Z",
+      scheduledAt: "2026-09-12T09:00:00Z",
       completionMode: "MATCHING_UPLOAD",
       filenameGlob: "arrival-*.csv",
       lastCheckedAt: "2026-09-12T09:55:00Z",
@@ -61,7 +64,8 @@ describe("Dashboard task urgency", () => {
     const externalTitle = screen.getByRole("heading", { name: "External delivery" });
     expect(overdueTitle.compareDocumentPosition(externalTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(overdueTitle.closest(".MuiCard-root")).toHaveAttribute("data-task-tone", "overdue");
-    expect(externalTitle.closest(".MuiCard-root")).toHaveAttribute("data-task-tone", "due-soon");
+    expect(externalTitle.closest(".MuiCard-root")).toHaveAttribute("data-task-tone", "halfway");
+    expect(within(externalTitle.closest(".MuiCard-root")!).getByText(/half time elapsed/i)).toBeInTheDocument();
 
     fireEvent.click(within(externalTitle.closest(".MuiCard-root")!).getByRole("button", { name: "Check folder" }));
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/tasks/matching/check", { method: "POST" }));

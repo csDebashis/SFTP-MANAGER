@@ -117,7 +117,7 @@ def grant_json(
     }
 
 
-def task_json(task: Task) -> dict[str, Any]:
+def task_json(task: Task, *, server_name: str | None = None) -> dict[str, Any]:
     effective_status = task.status
     if task.status in {"PENDING", "IN_PROGRESS"} and as_utc(task.due_at) < utc_now():
         effective_status = "OVERDUE"
@@ -129,8 +129,10 @@ def task_json(task: Task) -> dict[str, Any]:
         "title": task.title,
         "instructions": task.instructions,
         "serverId": task.server_id,
+        "serverName": server_name,
         "targetPath": task.target_path,
-        "assigneeId": task.assignee_id,
+        "assigneeType": "GROUP" if task.assignee_group_id else "USER",
+        "assigneeId": task.assignee_group_id or task.assignee_id,
         "createdBy": task.created_by,
         "dueAt": as_utc(task.due_at).isoformat(),
         "status": effective_status,
@@ -145,7 +147,7 @@ def task_json(task: Task) -> dict[str, Any]:
     }
 
 
-def task_definition_json(definition: TaskDefinition) -> dict[str, Any]:
+def task_definition_json(definition: TaskDefinition, *, assignee_name: str | None = None) -> dict[str, Any]:
     """Serialize a reusable schedule without coupling clients to SQLAlchemy."""
 
     return {
@@ -155,7 +157,9 @@ def task_definition_json(definition: TaskDefinition) -> dict[str, Any]:
         "enabled": definition.enabled,
         "serverId": definition.server_id,
         "targetPath": definition.target_path,
-        "assigneeId": definition.assignee_id,
+        "assigneeType": "GROUP" if definition.assignee_group_id else "USER",
+        "assigneeId": definition.assignee_group_id or definition.assignee_id,
+        "assigneeName": assignee_name,
         "createdBy": definition.created_by,
         "scheduleType": definition.schedule_type,
         "startAt": as_utc(definition.start_at).isoformat(),
@@ -183,6 +187,30 @@ def task_priority_order(now: datetime) -> tuple[Any, Any, Any, Any]:
     overdue_due_at = case((overdue, Task.due_at), else_=None)
     recent_pending = case((active, Task.created_at), else_=None)
     return priority, overdue_due_at.asc(), recent_pending.desc(), Task.created_at.desc()
+
+
+def task_assignee_condition(user_id: str) -> Any:
+    """Match direct tasks and shared tasks owned by any current user group."""
+
+    current_groups = select(GroupMember.group_id).where(GroupMember.user_id == user_id)
+    return or_(Task.assignee_id == user_id, Task.assignee_group_id.in_(current_groups))
+
+
+async def is_task_assignee(db: AsyncSession, task: Task, user_id: str) -> bool:
+    """Evaluate group membership at action time so membership changes are immediate."""
+
+    if task.assignee_id == user_id:
+        return True
+    if not task.assignee_group_id:
+        return False
+    return bool(
+        await db.scalar(
+            select(GroupMember.id).where(
+                GroupMember.group_id == task.assignee_group_id,
+                GroupMember.user_id == user_id,
+            ).limit(1)
+        )
+    )
 
 
 def upload_json(upload: FileUpload, *, chunk_size: int) -> dict[str, Any]:
@@ -358,12 +386,30 @@ class UploadStartInput(BaseModel):
         return valid_name(value)
 
 
+def schedule_frequency_limit_minutes(schedule_type: str, weekdays: list[int]) -> int:
+    """Return the shortest configured gap so work never overlaps its next run."""
+
+    if schedule_type == "ONCE":
+        return 43_200
+    if schedule_type == "MONTHLY":
+        return 28 * 24 * 60
+    if not weekdays:
+        return 24 * 60 if schedule_type == "DAILY" else 7 * 24 * 60
+    ordered = sorted(set(weekdays))
+    circular_gaps = [
+        (ordered[(index + 1) % len(ordered)] - day) % 7 or 7
+        for index, day in enumerate(ordered)
+    ]
+    return min(circular_gaps) * 24 * 60
+
+
 class TaskDefinitionInput(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     instructions: str = Field(default="", max_length=5000)
     server_id: str = Field(alias="serverId")
     target_path: str = Field(alias="targetPath")
     assignee_id: str = Field(alias="assigneeId")
+    assignee_type: Literal["USER", "GROUP"] = Field(default="USER", alias="assigneeType")
     schedule_type: Literal["ONCE", "DAILY", "WEEKLY", "MONTHLY"] = Field(default="ONCE", alias="scheduleType")
     start_at: datetime = Field(alias="startAt")
     timezone_name: str = Field(default="UTC", alias="timezone", max_length=64)
@@ -415,6 +461,11 @@ class TaskDefinitionInput(BaseModel):
                 raise ValueError("filename pattern is required for matching-file completion")
             if "[" in self.filename_glob or "]" in self.filename_glob:
                 raise ValueError("filename pattern supports only * and ? wildcards")
+        frequency_limit = schedule_frequency_limit_minutes(self.schedule_type, self.weekdays)
+        if self.due_offset_minutes > frequency_limit:
+            raise ValueError(
+                f"due after must not exceed this schedule's {frequency_limit}-minute frequency"
+            )
         return self
 
 
@@ -579,12 +630,12 @@ async def complete_matching_tasks_for_file_event(
     *,
     detection: str,
 ) -> int:
-    """Complete the actor's eligible assignments after an upload or move."""
+    """Complete the actor's direct or currently shared group work item."""
 
     tasks = (
         await db.scalars(
             select(Task).where(
-                Task.assignee_id == actor.id,
+                task_assignee_condition(actor.id),
                 Task.server_id == server_id,
                 Task.target_path == folder_path,
                 Task.completion_mode == "MATCHING_UPLOAD",
@@ -727,6 +778,7 @@ async def materialize_task_occurrence(
         server_id=definition.server_id,
         target_path=definition.target_path,
         assignee_id=definition.assignee_id,
+        assignee_group_id=definition.assignee_group_id,
         created_by=definition.created_by,
         due_at=due_at,
         status="OVERDUE" if due_at < current_time else "PENDING",
@@ -747,22 +799,6 @@ async def materialize_task_occurrence(
         detail={"definitionId": definition.id, "occurrenceKey": occurrence_key},
     )
     return True
-
-
-async def materialize_first_task_instance(
-    db: AsyncSession,
-    definition: TaskDefinition,
-    first_occurrence: datetime,
-    current_time: datetime,
-) -> bool:
-    """Expose a newly assigned schedule immediately, even before it starts."""
-
-    created = await materialize_task_occurrence(db, definition, first_occurrence, current_time)
-    definition.last_generated_at = as_utc(first_occurrence)
-    definition.next_run_at = next_schedule_occurrence(definition, first_occurrence)
-    definition.enabled = definition.next_run_at is not None
-    definition.version += 1
-    return created
 
 
 async def generate_due_task_instances(app: FastAPI, now: datetime | None = None) -> int:
@@ -1397,9 +1433,25 @@ def create_app(
         group = await db.get(Group, group_id)
         if not group:
             raise HTTPException(404, "Group not found")
+        grant_count = len(list(await db.scalars(select(FolderGrant.id).where(FolderGrant.principal_type == "GROUP", FolderGrant.principal_id == group_id))))
+        definition_count = len(list(await db.scalars(select(TaskDefinition.id).where(TaskDefinition.assignee_group_id == group_id))))
+        task_count = len(list(await db.scalars(select(Task.id).where(Task.assignee_group_id == group_id))))
         await db.execute(delete(FolderGrant).where(FolderGrant.principal_type == "GROUP", FolderGrant.principal_id == group_id))
         await db.delete(group)
-        await add_audit(db, request, "GROUP_DELETE", "group", actor=auth.user, resource_id=group_id, detail={"groupName": group.name})
+        await add_audit(
+            db,
+            request,
+            "GROUP_DELETE",
+            "group",
+            actor=auth.user,
+            resource_id=group_id,
+            detail={
+                "groupName": group.name,
+                "deletedGrantCount": grant_count,
+                "deletedTaskDefinitionCount": definition_count,
+                "deletedTaskCount": task_count,
+            },
+        )
         await db.commit()
         return Response(status_code=204)
 
@@ -2106,9 +2158,10 @@ def create_app(
         require_active(auth)
         query = select(Task).order_by(*task_priority_order(utc_now()))
         if auth.user.role not in {"ADMIN", "AUDITOR"}:
-            query = query.where(Task.assignee_id == auth.user.id)
+            query = query.where(task_assignee_condition(auth.user.id))
         tasks = (await db.scalars(query)).all()
-        return {"items": [task_json(task) for task in tasks]}
+        server_names = dict((await db.execute(select(SftpServer.id, SftpServer.name))).all())
+        return {"items": [task_json(task, server_name=server_names.get(task.server_id)) for task in tasks]}
 
     @app.get("/api/v1/task-definitions")
     async def list_task_definitions(auth: Auth, db: Db) -> dict[str, Any]:
@@ -2122,16 +2175,33 @@ def create_app(
                 for definition in definitions
                 if "MANAGE_TASKS" in await effective_permissions(db, auth.user, definition.server_id, definition.target_path)
             ]
-        return {"items": [task_definition_json(definition) for definition in definitions]}
+        user_names = dict((await db.execute(select(User.id, User.email))).all())
+        group_names = dict((await db.execute(select(Group.id, Group.name))).all())
+        return {
+            "items": [
+                task_definition_json(
+                    definition,
+                    assignee_name=(
+                        group_names.get(definition.assignee_group_id)
+                        if definition.assignee_group_id
+                        else user_names.get(definition.assignee_id)
+                    ),
+                )
+                for definition in definitions
+            ]
+        }
 
     @app.post("/api/v1/tasks", status_code=201, include_in_schema=False)
     @app.post("/api/v1/task-definitions", status_code=201)
     async def create_task_definition(payload: TaskDefinitionInput, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
         await require_task_manager(auth, db, payload.server_id, payload.target_path)
         server = await get_server(db, payload.server_id)
-        assignee = await db.get(User, payload.assignee_id)
-        if not assignee or assignee.state != "ACTIVE":
-            raise HTTPException(422, "Assignee not found")
+        if payload.assignee_type == "USER":
+            assignee = await db.get(User, payload.assignee_id)
+            if not assignee or assignee.state != "ACTIVE":
+                raise HTTPException(422, "Assignee not found")
+        elif not await db.get(Group, payload.assignee_id):
+            raise HTTPException(422, "Assignee group not found")
         try:
             await request.app.state.gateway.list(server, payload.target_path)
         except FileNotFoundError as exc:
@@ -2150,7 +2220,8 @@ def create_app(
             instructions=payload.instructions.strip(),
             server_id=payload.server_id,
             target_path=payload.target_path,
-            assignee_id=payload.assignee_id,
+            assignee_id=payload.assignee_id if payload.assignee_type == "USER" else None,
+            assignee_group_id=payload.assignee_id if payload.assignee_type == "GROUP" else None,
             created_by=auth.user.id,
             schedule_type=payload.schedule_type,
             start_at=as_utc(payload.start_at),
@@ -2165,7 +2236,6 @@ def create_app(
         )
         db.add(definition)
         await db.flush()
-        await materialize_first_task_instance(db, definition, first_occurrence, utc_now())
         await add_audit(
             db,
             request,
@@ -2177,13 +2247,16 @@ def create_app(
             path=definition.target_path,
             detail={
                 "scheduleType": definition.schedule_type,
+                "assigneeType": payload.assignee_type,
+                "assigneeId": payload.assignee_id,
                 "fileCheckIntervalMinutes": definition.file_check_interval_minutes,
             },
         )
         await db.commit()
         await generate_due_task_instances(request.app)
         await db.refresh(definition)
-        return task_definition_json(definition)
+        assignee_name = (await db.get(Group, payload.assignee_id)).name if payload.assignee_type == "GROUP" else (await db.get(User, payload.assignee_id)).email
+        return task_definition_json(definition, assignee_name=assignee_name)
 
     @app.patch("/api/v1/task-definitions/{definition_id}")
     async def update_task_definition(
@@ -2199,9 +2272,12 @@ def create_app(
         await require_task_manager(auth, db, definition.server_id, definition.target_path)
         await require_task_manager(auth, db, payload.server_id, payload.target_path)
         server = await get_server(db, payload.server_id)
-        assignee = await db.get(User, payload.assignee_id)
-        if not assignee or assignee.state != "ACTIVE":
-            raise HTTPException(422, "Assignee not found")
+        if payload.assignee_type == "USER":
+            assignee = await db.get(User, payload.assignee_id)
+            if not assignee or assignee.state != "ACTIVE":
+                raise HTTPException(422, "Assignee not found")
+        elif not await db.get(Group, payload.assignee_id):
+            raise HTTPException(422, "Assignee group not found")
         try:
             await request.app.state.gateway.list(server, payload.target_path)
         except FileNotFoundError as exc:
@@ -2212,7 +2288,8 @@ def create_app(
         definition.instructions = payload.instructions.strip()
         definition.server_id = payload.server_id
         definition.target_path = payload.target_path
-        definition.assignee_id = payload.assignee_id
+        definition.assignee_id = payload.assignee_id if payload.assignee_type == "USER" else None
+        definition.assignee_group_id = payload.assignee_id if payload.assignee_type == "GROUP" else None
         definition.schedule_type = payload.schedule_type
         definition.start_at = as_utc(payload.start_at)
         definition.timezone = payload.timezone_name
@@ -2232,12 +2309,12 @@ def create_app(
         definition.next_run_at = first_occurrence
         definition.enabled = True
         definition.version += 1
-        await materialize_first_task_instance(db, definition, first_occurrence, utc_now())
         await add_audit(db, request, "TASK_DEFINITION_UPDATE", "task_definition", actor=auth.user, resource_id=definition.id, server_id=definition.server_id, path=definition.target_path)
         await db.commit()
         await generate_due_task_instances(request.app)
         await db.refresh(definition)
-        return task_definition_json(definition)
+        assignee_name = (await db.get(Group, payload.assignee_id)).name if payload.assignee_type == "GROUP" else (await db.get(User, payload.assignee_id)).email
+        return task_definition_json(definition, assignee_name=assignee_name)
 
     @app.post("/api/v1/task-definitions/{definition_id}/disable")
     async def disable_task_definition(definition_id: str, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
@@ -2252,6 +2329,33 @@ def create_app(
         await db.commit()
         return task_definition_json(definition)
 
+    @app.delete("/api/v1/task-definitions/{definition_id}", status_code=204)
+    async def delete_task_definition(definition_id: str, request: Request, auth: CsrfAuth, db: Db) -> Response:
+        """Delete a schedule and its generated work items after explicit UI confirmation."""
+
+        definition = await db.get(TaskDefinition, definition_id)
+        if not definition:
+            raise HTTPException(404, "Task definition not found")
+        await require_task_manager(auth, db, definition.server_id, definition.target_path)
+        task_count = len(list(await db.scalars(select(Task.id).where(Task.definition_id == definition.id))))
+        await add_audit(
+            db,
+            request,
+            "TASK_DEFINITION_DELETE",
+            "task_definition",
+            actor=auth.user,
+            resource_id=definition.id,
+            server_id=definition.server_id,
+            path=definition.target_path,
+            detail={"title": definition.title, "deletedTaskCount": task_count},
+        )
+        # Older upgraded databases may not have the definition foreign key
+        # SQLite could not add in-place, so remove dependants explicitly.
+        await db.execute(delete(Task).where(Task.definition_id == definition.id))
+        await db.delete(definition)
+        await db.commit()
+        return Response(status_code=204)
+
     async def task_action(task_id: str, next_status: str, request: Request, auth: AuthContext, db: AsyncSession, reason: str | None = None) -> dict[str, Any]:
         require_active(auth)
         task = await db.get(Task, task_id)
@@ -2263,8 +2367,10 @@ def create_app(
         if next_status == "PENDING":
             if not manager:
                 raise HTTPException(403, "Only an administrator or scoped manager can reopen a task")
-        elif task.assignee_id != auth.user.id and auth.user.role != "ADMIN":
+        elif not await is_task_assignee(db, task, auth.user.id) and auth.user.role != "ADMIN":
             raise HTTPException(403, "Task action denied")
+        if next_status == "COMPLETED" and task.completion_mode == "MATCHING_UPLOAD":
+            raise HTTPException(409, "Matching-file tasks complete only after the required file is found")
         transitions = {
             "PENDING": {"IN_PROGRESS", "COMPLETED", "DISMISSED"},
             "IN_PROGRESS": {"COMPLETED", "DISMISSED"},
@@ -2281,7 +2387,8 @@ def create_app(
             task.next_check_at = utc_now()
         await add_audit(db, request, f"TASK_{next_status}", "task", actor=auth.user, resource_id=task.id, server_id=task.server_id, path=task.target_path, detail={"reason": reason} if reason else {})
         await db.commit()
-        return task_json(task)
+        server_name = await db.scalar(select(SftpServer.name).where(SftpServer.id == task.server_id))
+        return task_json(task, server_name=server_name)
 
     @app.post("/api/v1/tasks/{task_id}/start")
     async def start_task(task_id: str, request: Request, auth: CsrfAuth, db: Db) -> dict[str, Any]:
@@ -2311,7 +2418,7 @@ def create_app(
             auth.user.role == "MANAGER"
             and "MANAGE_TASKS" in await effective_permissions(db, auth.user, task.server_id, task.target_path)
         )
-        if task.assignee_id != auth.user.id and not manager:
+        if not await is_task_assignee(db, task, auth.user.id) and not manager:
             raise HTTPException(403, "Task check denied")
         if task.completion_mode != "MATCHING_UPLOAD":
             raise HTTPException(409, "Only matching-file tasks can check an SFTP folder")
@@ -2329,7 +2436,8 @@ def create_app(
         if not task:  # Defensive against a concurrent server cascade delete.
             raise HTTPException(404, "Task not found")
         await db.refresh(task)
-        return {"task": task_json(task), "matched": task.status == "COMPLETED"}
+        server_name = await db.scalar(select(SftpServer.name).where(SftpServer.id == task.server_id))
+        return {"task": task_json(task, server_name=server_name), "matched": task.status == "COMPLETED"}
 
     @app.get("/api/v1/audit-events")
     async def list_audit(auth: Auth, db: Db, limit: int = 100) -> dict[str, Any]:
@@ -2367,7 +2475,7 @@ def create_app(
         roots = await file_roots(auth, db)
         task_query = (
             select(Task)
-            .where(Task.assignee_id == auth.user.id, Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]))
+            .where(task_assignee_condition(auth.user.id), Task.status.in_(["PENDING", "IN_PROGRESS", "OVERDUE"]))
             .order_by(*task_priority_order(utc_now()))
             .limit(20)
         )
@@ -2383,7 +2491,7 @@ def create_app(
         if auth.user.role == "ADMIN":
             pending_approvals = len((await db.scalars(select(User.id).where(User.state == "PENDING_APPROVAL"))).all())
         server_names = dict((await db.execute(select(SftpServer.id, SftpServer.name))).all())
-        return {"tasks": [task_json(task) for task in tasks], "roots": roots["items"], "recentActivity": [audit_json(event, server_names.get(event.server_id)) for event in activity], "pendingApprovals": pending_approvals}
+        return {"tasks": [task_json(task, server_name=server_names.get(task.server_id)) for task in tasks], "roots": roots["items"], "recentActivity": [audit_json(event, server_names.get(event.server_id)) for event in activity], "pendingApprovals": pending_approvals}
 
     return app
 

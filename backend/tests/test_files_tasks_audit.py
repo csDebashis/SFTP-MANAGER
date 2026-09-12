@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -307,7 +308,31 @@ def test_csrf_is_required_for_mutation(client: TestClient) -> None:
 
 
 def test_task_transitions_and_reopen_authorization(client: TestClient, user_headers: dict[str, str]) -> None:
-    task = client.get("/api/v1/tasks").json()["items"][0]
+    admin_headers = login(client, "admin@gmail.com", "Admin123!Secure")
+    assignee_id = next(user["id"] for user in client.get("/api/v1/users").json()["items"] if user["email"] == "user@gmail.com")
+    server_id = client.get("/api/v1/sftp-servers").json()["items"][0]["id"]
+    created = client.post(
+        "/api/v1/task-definitions",
+        json={
+            "title": "Manual review",
+            "instructions": "Review and complete the work item.",
+            "serverId": server_id,
+            "targetPath": "/shared",
+            "assigneeType": "USER",
+            "assigneeId": assignee_id,
+            "scheduleType": "ONCE",
+            "startAt": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+            "timezone": "UTC",
+            "weekdays": [],
+            "dueOffsetMinutes": 60,
+            "completionMode": "MANUAL",
+            "fileCheckIntervalMinutes": 5,
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    user_headers = login(client, "user@gmail.com", "User123!Secure")
+    task = next(item for item in client.get("/api/v1/tasks").json()["items"] if item["definitionId"] == created.json()["id"])
     completed = client.post(f"/api/v1/tasks/{task['id']}/complete", headers=user_headers)
     assert completed.status_code == 200
     assert completed.json()["status"] == "COMPLETED"

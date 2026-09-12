@@ -31,4 +31,19 @@ Visibility is evaluated when events are queried:
 - Authentication events belonging to another user are never exposed to Manager or User.
 - Losing folder access removes related events from subsequent results; it does not alter stored events.
 
-The UI supports filters for date range, actor, action, outcome, server, and path. Every visible event identifies the actor, action, affected user/group or file/item, SFTP server, folder, outcome, and timestamp when those fields apply. Access-grant events show the affected principal and permissions. File upload, download, rename/move, replacement, and deletion events show the affected filename or item name. Request and resource IDs may be revealed from an accessible information control on hover or keyboard focus. Source IP and client/user-agent metadata remain in SQLite for authorized incident investigation and appear only in the Admin/Auditor audit page's request-details control; they are excluded from Manager/User activity, dashboard activity, and CSV exports. CSV export is available only to Admin and Auditor and is itself audited. Spreadsheet-formula prefixes in exported values must be escaped.
+The UI supports filters for date range, actor, action, outcome, server, and path.
+The dedicated audit page uses a compact, sticky-header table with balanced
+columns for action, actor, affected resource, SFTP location, outcome, and time,
+so desktop space is used evenly and substantially more events fit on screen.
+Long values truncate in-row with their full safe value available as accessible
+text/title. Every visible event identifies the actor, action, affected
+user/group or file/item, SFTP server, folder, outcome, and timestamp when those
+fields apply. Access-grant events show the affected principal and permissions.
+File upload, download, rename/move, replacement, and deletion events show the
+affected filename or item name. Request and resource IDs may be revealed from an
+accessible information control on hover or keyboard focus. Source IP and
+client/user-agent metadata remain in SQLite for authorized incident
+investigation and appear only in the Admin/Auditor audit page's request-details
+control; they are excluded from Manager/User activity, dashboard activity, and
+CSV exports. CSV export is available only to Admin and Auditor and is itself
+audited. Spreadsheet-formula prefixes in exported values must be escaped.

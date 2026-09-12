@@ -31,10 +31,12 @@ def test_head_creates_current_schema_on_a_fresh_database(tmp_path: Path) -> None
         "file_check_interval_minutes",
         "last_checked_at",
         "next_check_at",
+        "assignee_group_id",
     }
     assert {column["name"] for column in inspector.get_columns("task_definitions")} >= {
         "file_check_interval_minutes",
         "last_checked_at",
+        "assignee_group_id",
     }
     engine.dispose()
 
@@ -70,9 +72,10 @@ def test_task_migration_preserves_a_previous_schema(tmp_path: Path) -> None:
         "file_check_interval_minutes",
         "last_checked_at",
         "next_check_at",
+        "assignee_group_id",
     } <= task_columns
     indexes = {index["name"]: index for index in inspector.get_indexes("tasks")}
     assert indexes["uq_tasks_occurrence_key"]["unique"] == 1
     with engine.connect() as connection:
-        assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0005_task_file_checks"
+        assert connection.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0006_group_tasks"
     engine.dispose()

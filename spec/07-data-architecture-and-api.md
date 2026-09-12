@@ -16,9 +16,8 @@ All IDs are server-generated UUIDv4 values. A user's ID is assigned during signu
 | `SftpServer` | `id`, `name`, `host`, `port`, `username`, `authType`, `encryptedCredential`, `rootPath`, `hostKeyFingerprint`, `enabled`, `timeouts`, `lastTest`, `version` |
 | `FolderGrant` | `id`, `principalType`, `principalId`, `serverId`, `canonicalPath`, `permissions`, `recursive`, `createdBy`, `createdAt`, `version` |
 | `FileUpload` | `id`, `userId`, `serverId`, `folderPath`, `filename`, `totalSize`, SFTP-confirmed `receivedSize`, `replace`, `status`, `createdAt`, `updatedAt` |
-| `TaskDefinition` | Fields defined in section 5.7 plus `fileCheckIntervalMinutes`, `lastCheckedAt`, and occurrence-key generation metadata |
-| `TaskInstance` | `id`, `definitionId`, `definitionSnapshot`, `occurrenceKey`, `scheduledAt`, `dueAt`, `status`, `fileCheckIntervalMinutes`, `lastCheckedAt`, `nextCheckAt`, `assignments`, `createdAt` |
-| `TaskAssignment` | `userId`, `status`, `startedAt`, `completedAt`, `dismissedAt`, `dismissalReason`, `completedByEventId` |
+| `TaskDefinition` | Fields defined in section 5.7 plus exactly one of `assigneeUserId`/`assigneeGroupId`, `fileCheckIntervalMinutes`, `lastCheckedAt`, and occurrence-key generation metadata |
+| `TaskInstance` | `id`, `definitionId`, `occurrenceKey`, `scheduledAt`, `dueAt`, exactly one of `assigneeUserId`/`assigneeGroupId`, definition display/routing snapshot, `status`, `fileCheckIntervalMinutes`, `lastCheckedAt`, `nextCheckAt`, `createdAt` |
 | `AuditEvent` | Fields defined in section 5.8 |
 
 Repository contracts must exist for every entity category and expose only domain operations, not storage-specific queries. Services depend on repository protocols/interfaces through dependency injection. SQLAlchemy repositories use explicit SQLite transactions so changes to multiple related records either commit fully or roll back fully. Alembic owns all schema changes.
@@ -155,11 +154,11 @@ All endpoints are under `/api/v1`. JSON uses camelCase. Except for signup, login
 | `POST /files/replace` | Explicitly replace file | `UPLOAD` and `DELETE` |
 | `DELETE /files/item` | Delete file or empty folder | `DELETE` |
 | `GET, POST /task-definitions` | List/create definitions | Scoped; create requires Admin or `MANAGE_TASKS` Manager |
-| `GET, PATCH /task-definitions/{id}` | Read/change definition | Scoped task authority |
+| `GET, PATCH, DELETE /task-definitions/{id}` | Read/change/delete definition and generated work | Scoped task authority |
 | `POST /task-definitions/{id}/disable` | Disable definition | Scoped task authority |
 | `GET /tasks` | List assignments in urgency/recent-assignment order | Signed in, visibility-filtered |
 | `POST /tasks/{id}/start` | Start own assignment | Assignee |
-| `POST /tasks/{id}/complete` | Complete own assignment | Assignee |
+| `POST /tasks/{id}/complete` | Complete own manual assignment; matching-file work is rejected | Assignee |
 | `POST /tasks/{id}/dismiss` | Dismiss with reason | Assignee |
 | `POST /tasks/{id}/reopen` | Reopen assignment | Admin or scoped Manager |
 | `POST /tasks/{id}/check` | Force exact-folder validation for a matching-file assignment | Assignee, Admin, or scoped Manager |
@@ -172,6 +171,13 @@ All endpoints are under `/api/v1`. JSON uses camelCase. Except for signup, login
 File routes identify the server with `serverId` and the remote location with a URL-encoded path. The backend never trusts client-provided permission flags or canonical paths.
 
 Access-grant read, create, and update responses include `principalName` and `serverName` display fields in addition to `principalId` and `serverId`. For a group principal, `principalName` is the current group name; for a user principal, it is the current normalized email address resolved from the immutable user ID. The client must use IDs for mutations and the resolved names only for list presentation.
+
+Task responses include `serverName`, `assigneeType`, and the authoritative
+`assigneeId`. A group-owned task is one shared record selected through current
+`GroupMember` rows; no per-member task copies are generated. Task-definition
+create/update validates that the selected user or group exists. Task-list,
+dashboard, manual folder-check, portal file-matching, and task-action
+authorization all evaluate current group membership.
 
 ### 8.2 Pagination and filtering
 

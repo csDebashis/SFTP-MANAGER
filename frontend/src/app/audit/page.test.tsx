@@ -41,9 +41,10 @@ describe("Audit activity details", () => {
     apiMock.mockResolvedValue({ items: [uploadEvent] });
     render(<AuditPage />);
 
-    expect(await screen.findByText("Performed by user@gmail.com")).toBeInTheDocument();
+    expect(await screen.findByText("user@gmail.com")).toBeInTheDocument();
     expect(screen.getByText("File: report.csv")).toBeInTheDocument();
-    expect(screen.getByText("Server: Finance SFTP · Folder: /incoming")).toBeInTheDocument();
+    expect(screen.getByText("Finance SFTP")).toBeInTheDocument();
+    expect(screen.getByText("/incoming")).toBeInTheDocument();
     expect(screen.queryByText(/203\.0\.113\.42/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Audit Browser\/1\.0/)).not.toBeInTheDocument();
 
@@ -58,7 +59,7 @@ describe("Audit activity details", () => {
     apiMock.mockResolvedValue({ items: [userEvent] });
     render(<AuditPage />);
 
-    await screen.findByText("Performed by user@gmail.com");
+    await screen.findByText("user@gmail.com");
     fireEvent.mouseOver(screen.getByRole("button", { name: "Request details for FILE UPLOAD" }));
     expect(await screen.findByText(/request-123/)).toBeInTheDocument();
     expect(screen.queryByText(/203\.0\.113\.42/)).not.toBeInTheDocument();

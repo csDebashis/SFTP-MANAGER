@@ -143,3 +143,10 @@ Validation and safety rules:
 - Grant creation verifies that the server is enabled, the path exists and is a folder, and the acting Admin can establish an SFTP connection.
 - Grant edits use optimistic concurrency. Stale changes receive HTTP 412.
 - Removing a grant or group membership recalculates affected users' effective access immediately.
+- Group-owned work items use current membership rather than a generated member
+  snapshot. Adding a member immediately makes the existing shared work item
+  visible; removing a member immediately removes that visibility. A state
+  change made by any current member updates the one shared work item for every
+  other member.
+- Confirmed group deletion also removes schedules and generated work items
+  owned by that group in the same transaction; immutable audit history remains.

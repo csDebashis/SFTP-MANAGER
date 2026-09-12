@@ -4,12 +4,16 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import {
   Alert,
   Box,
-  Card,
-  CardContent,
   Chip,
   CircularProgress,
   IconButton,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
   Tooltip,
   Typography,
@@ -98,31 +102,38 @@ export default function AuditPage() {
         {events === null ? <CircularProgress /> : (
           <Stack spacing={1.5}>
             {filtered.length === 0 && <Alert severity="info">No matching events.</Alert>}
-            {filtered.map((event) => (
-              <Card key={event.id}>
-                <CardContent>
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
-                    <Box flex={1} minWidth={0}>
-                      <Typography fontWeight={750}>{event.action.replaceAll("_", " ")}</Typography>
-                      <Typography variant="body2">Performed by {event.actorDisplay}</Typography>
-                      <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                        {resourceSummary(event)}
-                      </Typography>
-                      {(event.serverName || event.serverId || event.folderPath) && (
-                        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-                          Server: {event.serverName || event.serverId || "Unknown"}{event.folderPath ? ` · Folder: ${event.folderPath}` : ""}
-                        </Typography>
-                      )}
-                    </Box>
-                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                      <Chip label={event.outcome} size="small" color={event.outcome === "SUCCESS" ? "success" : event.outcome === "DENIED" ? "warning" : "error"} />
-                      <Typography variant="caption" color="text.secondary">{new Date(event.timestamp).toLocaleString()}</Typography>
-                      <RequestDetails event={event} />
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
+            {filtered.length > 0 && (
+              <TableContainer sx={{ border: 1, borderColor: "divider", borderRadius: 3, backgroundColor: "background.paper", maxHeight: "calc(100vh - 260px)" }}>
+                <Table stickyHeader size="small" aria-label="Audit records" sx={{ minWidth: 1050, tableLayout: "fixed" }}>
+                  <TableHead><TableRow>
+                    <TableCell sx={{ width: "17%" }}>Action</TableCell>
+                    <TableCell sx={{ width: "16%" }}>Actor</TableCell>
+                    <TableCell sx={{ width: "23%" }}>Affected resource</TableCell>
+                    <TableCell sx={{ width: "21%" }}>SFTP location</TableCell>
+                    <TableCell sx={{ width: "9%" }}>Outcome</TableCell>
+                    <TableCell sx={{ width: "14%" }}>Time</TableCell>
+                  </TableRow></TableHead>
+                  <TableBody>{filtered.map((event) => (
+                    <TableRow key={event.id} hover>
+                      <TableCell><Typography variant="body2" fontWeight={750}>{event.action.replaceAll("_", " ")}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" noWrap title={event.actorDisplay}>{event.actorDisplay}</Typography></TableCell>
+                      <TableCell><Typography variant="body2" noWrap title={resourceSummary(event)}>{resourceSummary(event)}</Typography></TableCell>
+                      <TableCell>
+                        <Typography variant="body2" noWrap title={event.serverName || event.serverId || "Not applicable"}>{event.serverName || event.serverId || "Not applicable"}</Typography>
+                        {event.folderPath && <Typography variant="caption" color="text.secondary" noWrap display="block" title={event.folderPath}>{event.folderPath}</Typography>}
+                      </TableCell>
+                      <TableCell><Chip label={event.outcome} size="small" color={event.outcome === "SUCCESS" ? "success" : event.outcome === "DENIED" ? "warning" : "error"} /></TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.25} alignItems="center">
+                          <Typography variant="caption" color="text.secondary" noWrap>{new Date(event.timestamp).toLocaleString()}</Typography>
+                          <RequestDetails event={event} />
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+              </TableContainer>
+            )}
           </Stack>
         )}
       </Stack>

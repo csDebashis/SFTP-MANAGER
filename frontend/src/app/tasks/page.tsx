@@ -2,8 +2,10 @@
 
 import AddTaskIcon from "@mui/icons-material/AddTask";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import DeleteIcon from "@mui/icons-material/Delete";
 import DoNotDisturbAltIcon from "@mui/icons-material/DoNotDisturbAlt";
 import EditIcon from "@mui/icons-material/Edit";
+import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import PauseCircleOutlineIcon from "@mui/icons-material/PauseCircleOutline";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
@@ -15,9 +17,10 @@ import {
   TableHead, TableRow, TextField, Tooltip, Typography, alpha,
 } from "@mui/material";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/api/client";
 import AppShell from "@/components/AppShell";
-import type { Server, Task, TaskDefinition, User } from "@/types";
+import type { Group, Server, Task, TaskDefinition, User } from "@/types";
 
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const CHECK_INTERVALS = [
@@ -33,6 +36,7 @@ type TaskForm = {
   instructions: string;
   serverId: string;
   targetPath: string;
+  assigneeType: "USER" | "GROUP";
   assigneeId: string;
   scheduleType: "ONCE" | "DAILY" | "WEEKLY" | "MONTHLY";
   startAt: string;
@@ -52,7 +56,7 @@ function localDateTimeInput(date = new Date(Date.now() + 5 * 60_000)): string {
 
 function emptyForm(): TaskForm {
   return {
-    title: "", instructions: "", serverId: "", targetPath: "/", assigneeId: "",
+    title: "", instructions: "", serverId: "", targetPath: "/", assigneeType: "USER", assigneeId: "",
     scheduleType: "ONCE", startAt: localDateTimeInput(),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     weekdays: [], monthDay: "LAST_DAY", dueOffsetMinutes: "1440",
@@ -66,6 +70,7 @@ function formFromDefinition(definition: TaskDefinition): TaskForm {
     instructions: definition.instructions,
     serverId: definition.serverId,
     targetPath: definition.targetPath,
+    assigneeType: definition.assigneeType || "USER",
     assigneeId: definition.assigneeId,
     scheduleType: definition.scheduleType,
     startAt: localDateTimeInput(new Date(definition.startAt)),
@@ -99,21 +104,51 @@ function activeTask(task: Task): boolean {
   return ["PENDING", "IN_PROGRESS", "OVERDUE"].includes(task.status);
 }
 
-function TaskScheduleFields({ form, change, users, servers }: {
+function dueFrequencyLimit(form: Pick<TaskForm, "scheduleType" | "weekdays">): number {
+  if (form.scheduleType === "ONCE") return 43_200;
+  if (form.scheduleType === "MONTHLY") return 28 * 24 * 60;
+  if (!form.weekdays.length) return form.scheduleType === "DAILY" ? 24 * 60 : 7 * 24 * 60;
+  const ordered = Array.from(new Set(form.weekdays)).sort((left, right) => left - right);
+  return Math.min(...ordered.map((day, index) => ((ordered[(index + 1) % ordered.length] - day) % 7 || 7) * 24 * 60));
+}
+
+function taskTone(task: Task, now = Date.now()): "overdue" | "halfway" | "normal" {
+  const due = new Date(task.dueAt).getTime();
+  if (task.status === "OVERDUE" || activeTask(task) && due < now) return "overdue";
+  if (!activeTask(task)) return "normal";
+  const scheduled = new Date(task.scheduledAt || task.createdAt).getTime();
+  return due > scheduled && now >= scheduled + (due - scheduled) / 2 ? "halfway" : "normal";
+}
+
+function TaskScheduleFields({ form, change, users, groups, servers }: {
   form: TaskForm;
   change: (values: Partial<TaskForm>) => void;
   users: User[];
+  groups: Group[];
   servers: Server[];
 }) {
+  const principals = form.assigneeType === "GROUP" ? groups : users;
+  const frequencyLimit = dueFrequencyLimit(form);
   return (
     <Stack spacing={2}>
       <TextField autoFocus label="Title" value={form.title} onChange={(event) => change({ title: event.target.value })} required />
       <TextField label="Instructions" multiline minRows={2} value={form.instructions} onChange={(event) => change({ instructions: event.target.value })} />
       <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
         <FormControl fullWidth>
-          <InputLabel id="task-assignee-label">Assignee</InputLabel>
-          <Select labelId="task-assignee-label" label="Assignee" value={form.assigneeId} onChange={(event) => change({ assigneeId: event.target.value })}>
-            {users.map((user) => <MenuItem key={user.id} value={user.id}>{user.displayName} ({user.email})</MenuItem>)}
+          <InputLabel id="task-assignee-type-label">Assign to</InputLabel>
+          <Select labelId="task-assignee-type-label" label="Assign to" value={form.assigneeType} onChange={(event) => {
+            const assigneeType = event.target.value as TaskForm["assigneeType"];
+            const options = assigneeType === "GROUP" ? groups : users;
+            change({ assigneeType, assigneeId: options[0]?.id || "" });
+          }}>
+            <MenuItem value="USER">User</MenuItem>
+            <MenuItem value="GROUP">Group</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl fullWidth>
+          <InputLabel id="task-assignee-label">{form.assigneeType === "GROUP" ? "Group" : "User"}</InputLabel>
+          <Select labelId="task-assignee-label" label={form.assigneeType === "GROUP" ? "Group" : "User"} value={form.assigneeId} onChange={(event) => change({ assigneeId: event.target.value })}>
+            {principals.map((principal) => <MenuItem key={principal.id} value={principal.id}>{"email" in principal ? `${principal.displayName} (${principal.email})` : principal.name}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl fullWidth>
@@ -133,7 +168,7 @@ function TaskScheduleFields({ form, change, users, servers }: {
         </FormControl>
         <TextField label="First occurrence" type="datetime-local" value={form.startAt} onChange={(event) => change({ startAt: event.target.value })} slotProps={{ inputLabel: { shrink: true } }} required fullWidth />
         <TextField label="Timezone" value={form.timezone} onChange={(event) => change({ timezone: event.target.value })} required fullWidth />
-        <TextField label="Due after (minutes)" type="number" value={form.dueOffsetMinutes} onChange={(event) => change({ dueOffsetMinutes: event.target.value })} inputProps={{ min: 0, max: 43200 }} required fullWidth />
+        <TextField label="Due after (minutes)" type="number" value={form.dueOffsetMinutes} onChange={(event) => change({ dueOffsetMinutes: event.target.value })} inputProps={{ min: 0, max: frequencyLimit }} helperText={`Maximum ${frequencyLimit.toLocaleString()} minutes for this frequency`} required fullWidth />
       </Stack>
       {(form.scheduleType === "DAILY" || form.scheduleType === "WEEKLY") && (
         <FormControl fullWidth>
@@ -179,6 +214,7 @@ export default function TasksPage() {
   const [definitions, setDefinitions] = useState<TaskDefinition[]>([]);
   const [me, setMe] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [pageError, setPageError] = useState("");
   const [success, setSuccess] = useState("");
@@ -192,6 +228,10 @@ export default function TasksPage() {
   const [dismissError, setDismissError] = useState("");
   const [reason, setReason] = useState("");
   const [busyTask, setBusyTask] = useState("");
+  const [deletingDefinition, setDeletingDefinition] = useState<TaskDefinition | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
 
   async function load() {
     setLoading(true);
@@ -201,10 +241,11 @@ export default function TasksPage() {
       setTasks(taskResult.items);
       setMe(current.user);
       if (current.user.role === "ADMIN") {
-        const [userResult, serverResult, definitionResult] = await Promise.all([
-          api<{ items: User[] }>("/users"), api<{ items: Server[] }>("/sftp-servers"), api<{ items: TaskDefinition[] }>("/task-definitions"),
+        const [userResult, groupResult, serverResult, definitionResult] = await Promise.all([
+          api<{ items: User[] }>("/users"), api<{ items: Group[] }>("/groups"), api<{ items: Server[] }>("/sftp-servers"), api<{ items: TaskDefinition[] }>("/task-definitions"),
         ]);
         setUsers(userResult.items.filter((user) => user.state === "ACTIVE"));
+        setGroups(groupResult.items);
         setServers(serverResult.items.filter((server) => server.enabled));
         setDefinitions(definitionResult.items);
       }
@@ -241,6 +282,10 @@ export default function TasksPage() {
     setForm(formFromDefinition(definition)); setEditingDefinition(definition); setFormError(""); setPageError(""); setScheduleDialog(true);
   }
 
+  function openDelete(definition: TaskDefinition) {
+    setDeletingDefinition(definition); setDeleteError(""); setPageError("");
+  }
+
   function closeSchedule() {
     if (submitting) return;
     setScheduleDialog(false); setEditingDefinition(null); setFormError("");
@@ -262,7 +307,7 @@ export default function TasksPage() {
       await api(editing ? `/task-definitions/${editing.id}` : "/task-definitions", { method: editing ? "PATCH" : "POST", body: JSON.stringify(body) });
       setScheduleDialog(false); setEditingDefinition(null);
       await load();
-      showSuccess(editing ? "Task schedule updated" : "Task schedule created and assigned");
+      showSuccess(editing ? "Task schedule updated" : "Task schedule created");
     } catch (reasonValue) {
       setFormError(errorMessage(reasonValue, "Unable to save task schedule"));
     } finally {
@@ -275,6 +320,21 @@ export default function TasksPage() {
     try {
       await api(`/task-definitions/${definition.id}/disable`, { method: "POST" }); await load(); showSuccess("Task schedule disabled");
     } catch (reasonValue) { setPageError(errorMessage(reasonValue, "Unable to disable task schedule")); }
+  }
+
+  async function deleteDefinition() {
+    if (!deletingDefinition) return;
+    setDeleteError(""); setDeleting(true);
+    try {
+      await api(`/task-definitions/${deletingDefinition.id}`, { method: "DELETE" });
+      setDeletingDefinition(null);
+      await load();
+      showSuccess("Task schedule deleted");
+    } catch (reasonValue) {
+      setDeleteError(errorMessage(reasonValue, "Unable to delete task schedule"));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function taskAction(task: Task, value: string, body?: object) {
@@ -316,12 +376,14 @@ export default function TasksPage() {
                     <Table aria-label="Task schedules">
                       <TableHead><TableRow><TableCell>Description</TableCell><TableCell>Schedule</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
                       <TableBody>{definitions.map((definition) => {
-                        const assignee = users.find((user) => user.id === definition.assigneeId);
+                        const assignee = definition.assigneeType === "GROUP"
+                          ? groups.find((group) => group.id === definition.assigneeId)
+                          : users.find((user) => user.id === definition.assigneeId);
                         const server = servers.find((item) => item.id === definition.serverId);
                         const details = (
                           <Stack spacing={0.5} sx={{ p: 0.5 }}>
                             <Typography variant="subtitle2">{definition.title}</Typography>
-                            <Typography variant="caption">Assignee: {assignee ? `${assignee.displayName} (${assignee.email})` : definition.assigneeId}</Typography>
+                            <Typography variant="caption">Assignee: {definition.assigneeType === "GROUP" ? `Group · ${assignee && "name" in assignee ? assignee.name : definition.assigneeName || definition.assigneeId}` : assignee && "email" in assignee ? `${assignee.displayName} (${assignee.email})` : definition.assigneeName || definition.assigneeId}</Typography>
                             <Typography variant="caption">Server/folder: {server?.name || definition.serverId} · {definition.targetPath}</Typography>
                             <Typography variant="caption">Schedule: {scheduleSummary(definition)} · {definition.timezone}</Typography>
                             <Typography variant="caption">Due offset: {definition.dueOffsetMinutes} minutes</Typography>
@@ -339,6 +401,7 @@ export default function TasksPage() {
                               <Tooltip title={details} arrow placement="left"><IconButton aria-label={`View ${definition.title} schedule details`}><InfoOutlinedIcon /></IconButton></Tooltip>
                               <Tooltip title="Edit schedule"><IconButton aria-label={`Edit ${definition.title}`} onClick={() => openEdit(definition)}><EditIcon /></IconButton></Tooltip>
                               {definition.enabled && <Tooltip title="Disable future occurrences"><IconButton aria-label={`Disable ${definition.title}`} color="warning" onClick={() => disableDefinition(definition)}><PauseCircleOutlineIcon /></IconButton></Tooltip>}
+                              <Tooltip title="Delete schedule"><IconButton aria-label={`Delete ${definition.title}`} color="error" onClick={() => openDelete(definition)}><DeleteIcon /></IconButton></Tooltip>
                             </Stack></TableCell>
                           </TableRow>
                         );
@@ -354,18 +417,20 @@ export default function TasksPage() {
               {sortedTasks.length === 0 ? <Alert severity="info">No tasks to show.</Alert> : (
                 <TableContainer component={Card}>
                   <Table aria-label="Assigned work items">
-                    <TableHead><TableRow><TableCell>Task</TableCell><TableCell>Due and status</TableCell><TableCell>Folder check</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
+                    <TableHead><TableRow><TableCell>Task</TableCell><TableCell>SFTP location</TableCell><TableCell>Due and status</TableCell><TableCell>Folder check</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
                     <TableBody>{sortedTasks.map((task) => {
-                      const dueSoon = activeTask(task) && task.status !== "OVERDUE" && new Date(task.dueAt).getTime() - Date.now() <= 24 * 60 * 60 * 1000;
+                      const tone = taskTone(task);
                       return (
-                        <TableRow key={task.id} data-testid={`task-row-${task.id}`} data-task-tone={task.status === "OVERDUE" ? "overdue" : dueSoon ? "due-soon" : "normal"} sx={(theme) => task.status === "OVERDUE" ? { backgroundColor: alpha(theme.palette.error.main, 0.13), borderLeft: `5px solid ${theme.palette.error.main}` } : dueSoon ? { backgroundColor: alpha(theme.palette.warning.main, 0.12), borderLeft: `5px solid ${theme.palette.warning.main}` } : {}}>
-                          <TableCell><Typography fontWeight={750}>{task.title}</Typography><Typography variant="body2" color="text.secondary">{task.instructions || "No instructions"}</Typography><Typography variant="caption">{task.targetPath}</Typography></TableCell>
-                          <TableCell><Stack spacing={0.5} alignItems="flex-start"><Chip size="small" label={task.status} color={task.status === "OVERDUE" ? "error" : task.status === "COMPLETED" ? "success" : dueSoon ? "warning" : "primary"} /><Typography variant="body2">{new Date(task.dueAt).toLocaleString()}</Typography></Stack></TableCell>
+                        <TableRow key={task.id} data-testid={`task-row-${task.id}`} data-task-tone={tone} sx={(theme) => tone === "overdue" ? { backgroundColor: alpha(theme.palette.error.main, 0.13), borderLeft: `5px solid ${theme.palette.error.main}` } : tone === "halfway" ? { backgroundColor: alpha(theme.palette.warning.main, 0.12), borderLeft: `5px solid ${theme.palette.warning.main}` } : {}}>
+                          <TableCell><Typography fontWeight={750}>{task.title}</Typography><Typography variant="body2" color="text.secondary">{task.instructions || "No instructions"}</Typography></TableCell>
+                          <TableCell><Typography fontWeight={650}>{task.serverName || task.serverId}</Typography><Typography variant="caption" color="text.secondary">{task.targetPath}</Typography></TableCell>
+                          <TableCell><Stack spacing={0.5} alignItems="flex-start"><Chip size="small" label={tone === "halfway" ? `${task.status} · half time elapsed` : task.status} color={tone === "overdue" ? "error" : task.status === "COMPLETED" ? "success" : tone === "halfway" ? "warning" : "primary"} /><Typography variant="body2">{new Date(task.dueAt).toLocaleString()}</Typography></Stack></TableCell>
                           <TableCell>{task.completionMode === "MATCHING_UPLOAD" ? <Stack spacing={0.25}><Typography variant="body2">{task.filenameGlob}</Typography><Typography variant="caption" color="text.secondary">{checkIntervalLabel(task.fileCheckIntervalMinutes)}</Typography><Typography variant="caption" color="text.secondary">Last checked: {task.lastCheckedAt ? new Date(task.lastCheckedAt).toLocaleString() : "Not checked"}</Typography></Stack> : <Typography color="text.secondary">Manual completion</Typography>}</TableCell>
                           <TableCell align="right"><Stack direction="row" spacing={1} justifyContent="flex-end" flexWrap="wrap">
+                            {task.completionMode === "MATCHING_UPLOAD" && activeTask(task) && <Button size="small" startIcon={<FolderOpenIcon />} onClick={() => router.push(`/files?serverId=${task.serverId}&path=${encodeURIComponent(task.targetPath)}`)}>Open folder</Button>}
                             {task.completionMode === "MATCHING_UPLOAD" && activeTask(task) && <Button size="small" startIcon={busyTask === `check:${task.id}` ? <CircularProgress size={16} color="inherit" /> : <RefreshIcon />} disabled={Boolean(busyTask)} onClick={() => checkFolder(task)}>Check folder</Button>}
                             {task.status === "PENDING" && <Button size="small" startIcon={<PlayArrowIcon />} disabled={Boolean(busyTask)} onClick={() => taskAction(task, "start")}>Start</Button>}
-                            {activeTask(task) && <Button size="small" color="success" startIcon={<CheckCircleIcon />} disabled={Boolean(busyTask)} onClick={() => taskAction(task, "complete")}>Complete</Button>}
+                            {task.completionMode !== "MATCHING_UPLOAD" && activeTask(task) && <Button size="small" color="success" startIcon={<CheckCircleIcon />} disabled={Boolean(busyTask)} onClick={() => taskAction(task, "complete")}>Complete</Button>}
                             {activeTask(task) && <Button size="small" color="warning" startIcon={<DoNotDisturbAltIcon />} disabled={Boolean(busyTask)} onClick={() => { setDismissTask(task); setDismissError(""); setReason(""); setPageError(""); }}>Dismiss</Button>}
                           </Stack></TableCell>
                         </TableRow>
@@ -382,13 +447,23 @@ export default function TasksPage() {
       <Dialog open={scheduleDialog} onClose={closeSchedule} fullWidth maxWidth="lg">
         <DialogTitle>{editingDefinition ? "Edit task schedule" : "Add task schedule"}</DialogTitle>
         <Stack component="form" onSubmit={saveSchedule}>
-          <DialogContent><TaskScheduleFields form={form} change={(values) => setForm((current) => ({ ...current, ...values }))} users={users} servers={servers} /></DialogContent>
+          <DialogContent><TaskScheduleFields form={form} change={(values) => setForm((current) => ({ ...current, ...values }))} users={users} groups={groups} servers={servers} /></DialogContent>
           <DialogActions sx={{ justifyContent: "flex-start", px: 3 }}>
-            <Button variant="contained" type="submit" startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <AddTaskIcon />} disabled={submitting || !form.serverId || !form.assigneeId || (form.scheduleType === "WEEKLY" && form.weekdays.length === 0)}>{submitting ? "Saving…" : editingDefinition ? "Save changes" : "Create and assign"}</Button>
+            <Button variant="contained" type="submit" startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <AddTaskIcon />} disabled={submitting || !form.serverId || !form.assigneeId || Number(form.dueOffsetMinutes) > dueFrequencyLimit(form) || (form.scheduleType === "WEEKLY" && form.weekdays.length === 0)}>{submitting ? "Saving…" : editingDefinition ? "Save changes" : "Create schedule"}</Button>
             <Button type="button" onClick={closeSchedule} disabled={submitting}>Cancel</Button>
           </DialogActions>
           {formError && <Alert severity="error" variant="filled" sx={{ mx: 3, mb: 2 }}>{formError}</Alert>}
         </Stack>
+      </Dialog>
+
+      <Dialog open={Boolean(deletingDefinition)} onClose={() => { if (!deleting) { setDeletingDefinition(null); setDeleteError(""); } }} fullWidth maxWidth="sm">
+        <DialogTitle>Delete task schedule</DialogTitle>
+        <DialogContent><Alert severity="warning">Deleting <strong>{deletingDefinition?.title}</strong> stops future occurrences and removes its generated work items. Audit history is retained.</Alert></DialogContent>
+        <DialogActions sx={{ justifyContent: "flex-start", px: 3 }}>
+          <Button variant="contained" color="error" startIcon={deleting ? <CircularProgress size={18} color="inherit" /> : <DeleteIcon />} disabled={deleting} onClick={() => void deleteDefinition()}>{deleting ? "Deleting…" : "Delete schedule"}</Button>
+          <Button disabled={deleting} onClick={() => { setDeletingDefinition(null); setDeleteError(""); }}>Cancel</Button>
+        </DialogActions>
+        {deleteError && <Alert severity="error" variant="filled" sx={{ mx: 3, mb: 2 }}>{deleteError}</Alert>}
       </Dialog>
 
       <Dialog open={Boolean(dismissTask)} onClose={() => { if (!busyTask) setDismissTask(null); }} fullWidth maxWidth="sm">

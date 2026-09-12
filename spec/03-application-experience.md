@@ -24,4 +24,13 @@ The authenticated home page contains:
 3. **Recent activity** — the 20 newest audit events the user is authorized to view.
 4. **Administrative attention** — visible only to Admins and containing pending signup count, disabled server count, and failed task-generation count.
 
-Each task card displays title, target server/folder, due time, status, instructions summary, and a primary action. Overdue cards are strongly highlighted and work due within 24 hours uses a warning treatment, with textual status retained for accessibility. The primary action opens the exact folder or page configured by the task. An unresolved matching-file card also provides a spinner-backed **Check folder** action and displays its last-check timestamp. An assigned user may dismiss an assignment only after entering a reason between 3 and 500 characters. Dismissal is reversible by an Admin or an authorized Manager.
+Each task card displays title, target SFTP server/folder, due time, status,
+instructions summary, and a primary action. Once at least half of the interval
+from `scheduledAt` to `dueAt` has elapsed, unresolved work uses an orange warning
+treatment and the text **half time elapsed**. Once overdue, it uses a strong red
+error highlight. The primary action for folder/file work opens the exact SFTP
+folder configured by the task. An unresolved matching-file card also provides a
+spinner-backed **Check folder** action and displays its last-check timestamp. An
+assigned user may dismiss an assignment only after entering a reason between 3
+and 500 characters. Dismissal is reversible by an Admin or an authorized
+Manager.

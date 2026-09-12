@@ -18,7 +18,9 @@ export type Task = {
   title: string;
   instructions: string;
   serverId: string;
+  serverName?: string;
   targetPath: string;
+  assigneeType: "USER" | "GROUP";
   assigneeId: string;
   dueAt: string;
   status: string;
@@ -36,7 +38,9 @@ export type TaskDefinition = {
   enabled: boolean;
   serverId: string;
   targetPath: string;
+  assigneeType: "USER" | "GROUP";
   assigneeId: string;
+  assigneeName?: string;
   scheduleType: "ONCE" | "DAILY" | "WEEKLY" | "MONTHLY";
   startAt: string;
   timezone: string;

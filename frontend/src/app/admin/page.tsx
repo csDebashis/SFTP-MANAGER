@@ -1052,7 +1052,7 @@ function GroupsPanel({ groups, users, done, fail }: { groups: Group[]; users: Us
   }
 
   async function remove(group: Group) {
-    if (!window.confirm(`Remove group ${group.name} and its grants?`)) return;
+    if (!window.confirm(`Remove group ${group.name}, its grants, task schedules, and generated work items?`)) return;
     setRemovingId(group.id);
     try {
       await api(`/groups/${group.id}`, { method: "DELETE" });
