@@ -74,7 +74,7 @@ SFTP-MANAGER/
 ├── deploy/
 │   └── secrets/                 # Local Compose secret files (never committed)
 ├── backend/
-│   ├── Dockerfile
+│   ├── Containerfile
 │   ├── pyproject.toml
 │   ├── app/
 │   │   ├── main.py
@@ -89,7 +89,7 @@ SFTP-MANAGER/
 │   │   └── observability/       # Logging, metrics, health, request IDs
 │   └── tests/
 ├── frontend/
-│   ├── Dockerfile
+│   ├── Containerfile
 │   ├── package.json
 │   ├── package-lock.json
 │   ├── next.config.ts

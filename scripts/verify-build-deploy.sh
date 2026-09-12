@@ -6,8 +6,8 @@ usage() {
   printf '%s\n' \
     "Usage: $0 [--verify-only]" \
     "" \
-    "Runs backend and frontend tests in isolated Docker targets, builds the" \
-    "production images, validates Compose, and deploys the stack." \
+    "Runs backend and frontend tests in isolated Podman targets, builds the" \
+    "production images, validates Podman Compose, and deploys the stack." \
     "Use --verify-only to stop after tests and production image builds."
 }
 
@@ -46,27 +46,41 @@ require_file() {
   fi
 }
 
-require_command docker
-docker compose version >/dev/null
+require_command podman
+require_command podman-compose
+export PODMAN_COMPOSE_PROVIDER="${PODMAN_COMPOSE_PROVIDER:-podman-compose}"
+
+if ! podman info >/dev/null 2>&1; then
+  printf '%s\n' 'Podman is installed but its service is unavailable.' >&2
+  printf '%s\n' 'On macOS, initialize once with `podman machine init`, then run `podman machine start`.' >&2
+  exit 1
+fi
+
+podman compose version >/dev/null
 
 require_file backend/pyproject.toml
 require_file backend/app/main.py
+require_file backend/Containerfile
 require_file frontend/package.json
 require_file frontend/package-lock.json
+require_file frontend/Containerfile
+
+printf '%s\n' 'Checking the Podman deployment contract...'
+./scripts/test-podman-deployment.sh
 
 printf '%s\n' 'Building and running backend tests...'
-docker build --target test --tag sftp-manager-backend-test:local ./backend
-docker run --rm sftp-manager-backend-test:local
+podman build --file backend/Containerfile --target test --tag localhost/sftp-manager-backend-test:local ./backend
+podman run --rm localhost/sftp-manager-backend-test:local
 
 printf '%s\n' 'Building and running frontend tests...'
-docker build --target test --tag sftp-manager-frontend-test:local ./frontend
-docker run --rm sftp-manager-frontend-test:local
+podman build --file frontend/Containerfile --target test --tag localhost/sftp-manager-frontend-test:local ./frontend
+podman run --rm localhost/sftp-manager-frontend-test:local
 
-printf '%s\n' 'Validating the Docker Compose model...'
-BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-admin@example.invalid}" docker compose config --quiet
+printf '%s\n' 'Validating the Podman Compose model...'
+BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-admin@example.invalid}" podman compose config --quiet
 
 printf '%s\n' 'Building production images...'
-BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-admin@example.invalid}" docker compose build
+BOOTSTRAP_ADMIN_EMAIL="${BOOTSTRAP_ADMIN_EMAIL:-admin@example.invalid}" podman compose build
 
 if [ "$mode" = verify ]; then
   printf '%s\n' 'Verification and production image builds completed successfully.'
@@ -100,11 +114,11 @@ do
 done
 
 printf '%s\n' 'Deploying the stack and waiting for healthy services...'
-docker compose up --detach --remove-orphans --wait
-docker compose ps
+podman compose up --detach --remove-orphans --wait
+podman compose ps
 
 printf '%s\n' 'Verifying the backend filesystem log...'
-docker compose exec -T backend python -c \
+podman compose exec -T backend python -c \
   "from pathlib import Path; path = Path('/var/log/sftp-manager/application.log'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty application log: {path}'"
 if [ ! -s "$application_log_dir/application.log" ]; then
   printf 'Missing or empty host application log: %s\n' "$application_log_dir/application.log" >&2
@@ -112,7 +126,7 @@ if [ ! -s "$application_log_dir/application.log" ]; then
 fi
 
 printf '%s\n' 'Verifying the host-mounted SQLite database...'
-docker compose exec -T backend python -c \
+podman compose exec -T backend python -c \
   "import sqlite3; from pathlib import Path; from app.models import CURRENT_SCHEMA_BASELINE; path = Path('/data/sftp-manager.db'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty SQLite database: {path}'; connection = sqlite3.connect(path); integrity = connection.execute('PRAGMA integrity_check').fetchone()[0]; tables = {row[0] for row in connection.execute(\"SELECT name FROM sqlite_master WHERE type = 'table'\")}; baseline = connection.execute('SELECT version FROM schema_baseline WHERE id = 1').fetchone(); connection.close(); assert integrity == 'ok', f'SQLite integrity check failed: {integrity}'; assert baseline == (CURRENT_SCHEMA_BASELINE,), f'Unexpected schema baseline: {baseline}'; assert 'alembic_version' not in tables, 'Alembic metadata must not exist in a baseline database'"
 if [ ! -s "$database_dir/sftp-manager.db" ]; then
   printf 'Missing or empty host SQLite database: %s\n' "$database_dir/sftp-manager.db" >&2

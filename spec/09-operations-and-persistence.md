@@ -25,7 +25,7 @@ Owner: Platform operations. Related modules:
 
 ## 12. Configuration and deployment
 
-The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Docker Compose builds each service from its own Dockerfile, connects them on a private network, bind-mounts `/Users/debchowd/SFTP-MANAGER/db` at `/data` for SQLite, and bind-mounts `/Users/debchowd/SFTP-MANAGER/logs` at `/var/log/sftp-manager` for rotating application logs. Both host directories are excluded from Git. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems.
+The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Rootless Podman Compose builds each service from its own Containerfile, connects them on a private network, bind-mounts `/Users/debchowd/SFTP-MANAGER/db` at `/data` for SQLite, and bind-mounts `/Users/debchowd/SFTP-MANAGER/logs` at `/var/log/sftp-manager` for rotating application logs. Both host directories are excluded from Git. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems. On macOS, Podman runs the containers in a Podman machine; the host directories remain the operator-facing persistence paths.
 
 Required production configuration includes:
 
@@ -54,12 +54,12 @@ Deployment must enforce:
 
 ### 12.1 Container build and deployment workflow
 
-- `backend/Dockerfile` is a multi-stage Python image with separate `test` and `runtime` targets. The runtime target installs the application wheel and starts one Uvicorn worker as a non-root user; FastAPI startup initializes or validates the baseline schema.
-- `frontend/Dockerfile` is a multi-stage Node.js image with separate `test`, `build`, and `runtime` targets. The runtime target starts the optimized Next.js application as a non-root user.
+- `backend/Containerfile` is a multi-stage Python OCI image with separate `test` and `runtime` targets. The runtime target installs the application wheel and starts one Uvicorn worker as a non-root user; FastAPI startup initializes or validates the baseline schema.
+- `frontend/Containerfile` is a multi-stage Node.js OCI image with separate `test`, `build`, and `runtime` targets. The runtime target starts the optimized Next.js application as a non-root user.
 - `compose.yaml` builds the two runtime targets, exposes only the frontend, waits for backend readiness, mounts the Git-ignored host `db` and `logs` directories, and injects secrets as files.
-- `scripts/verify-build-deploy.sh` is the supported local release entry point. By default it builds and runs both test targets, validates Compose, builds production images, creates and validates both writable host persistence directories, deploys with `docker compose up --detach --remove-orphans --wait`, verifies the non-empty log through both container and host paths, and verifies SQLite integrity, the current baseline marker, and absence of Alembic metadata through both paths before printing service status.
+- `scripts/verify-build-deploy.sh` is the supported local release entry point. It requires an available Podman service and `podman-compose`, explicitly selects that provider through `PODMAN_COMPOSE_PROVIDER`, builds and runs both test targets with Podman, validates the Compose model, builds production images, creates and validates both writable host persistence directories, deploys with `podman compose up --detach --remove-orphans --wait`, verifies the non-empty log through both container and host paths, and verifies SQLite integrity, the current baseline marker, and absence of Alembic metadata through both paths before printing service status.
 - `scripts/verify-build-deploy.sh --verify-only` performs tests and production image builds without deploying.
-- Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. The script must stop before deployment if any prerequisite is missing.
+- Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. On macOS, operators initialize the Podman machine once and start it before invoking the deployment script. The script must stop before deployment if Podman, its Compose provider, its service, or any application prerequisite is missing.
 
 ## 13. SQLite persistence and future scaling
 

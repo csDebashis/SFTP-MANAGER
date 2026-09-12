@@ -55,7 +55,7 @@ The product must provide:
 - In-app task and approval queues.
 - Configurable email for account approval and password-reset messages.
 - Searchable, filterable, durable audit events stored in SQLite.
-- Separate frontend and backend containers orchestrated by Docker Compose.
+- Separate frontend and backend containers orchestrated by rootless Podman Compose.
 - Durable SQLite storage initialized from the current schema baseline.
 
 ### 3.2 Excluded from the first release

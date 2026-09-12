@@ -99,7 +99,7 @@ Run against a disposable SFTP server and cover:
   and databases whose marker or table/column shape differs from the current
   non-migrating schema baseline.
 - Operational logging tests cover every supported severity, HTTP status mapping, valid JSON-lines output, request-ID/route correlation, rotation settings, persistent container filesystem output, and exclusion of query strings, payloads, credentials, raw exceptions, IP addresses, and client metadata.
-- Compose deployment tests verify that `/var/log/sftp-manager/application.log`
+- Podman Compose deployment tests verify that `/var/log/sftp-manager/application.log`
   is the same non-empty file exposed in the Git-ignored host
   `/Users/debchowd/SFTP-MANAGER/logs` directory, and that
   `/data/sftp-manager.db` is the same valid SQLite database exposed in the
@@ -132,7 +132,7 @@ Run against a disposable SFTP server and cover:
 | `AC-11` | Users see their own and currently authorized-folder events; Admins and Auditors can search all events; no role can modify audit history. |
 | `AC-12` | All file content is streamed, paths are canonicalized, symlinks/traversal are rejected, and remote roots cannot be escaped. |
 | `AC-13` | The backend persists application state through SQLAlchemy repository interfaces and SQLite, and repository contract tests permit a later database implementation without API changes. |
-| `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
+| `AC-14` | Restarting or replacing Podman containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
 | `AC-15` | Primary workflows meet WCAG 2.1 AA and pass the defined functional, integration, authorization, security, and operational test suites. |
 
 Release approval requires all acceptance criteria to pass in a production-like environment. Any exception must be documented with owner, risk, mitigation, and expiry date.

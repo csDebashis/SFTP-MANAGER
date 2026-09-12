@@ -15,15 +15,15 @@ Browser
 Next.js / React frontend (port 3000)
   │  same-origin /api proxy
   ▼
-FastAPI backend (private Compose network)
+FastAPI backend (private Podman Compose network)
   ├── SQLite durable application state (/data)
   ├── JSON operational logs (/var/log/sftp-manager)
   └── AsyncSSH connections to configured SFTP servers
 ```
 
-The frontend and backend have independent Dockerfiles and non-root runtime
-images. Only the frontend is published to the host by the reference Compose
-deployment.
+The frontend and backend have independent Containerfiles and non-root OCI
+runtime images. Only the frontend is published to the host by the reference
+Podman Compose deployment.
 
 ## Backend modules
 

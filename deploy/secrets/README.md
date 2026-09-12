@@ -1,4 +1,4 @@
-# Local Compose secrets
+# Local Podman Compose secrets
 
 Create these files before deploying with `scripts/verify-build-deploy.sh`:
 

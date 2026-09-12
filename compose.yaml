@@ -4,7 +4,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
       target: runtime
     image: sftp-manager-backend:local
     restart: unless-stopped
@@ -50,7 +50,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
       target: runtime
       args:
         BACKEND_INTERNAL_URL: http://backend:8000

@@ -50,7 +50,7 @@ Use this workflow for every behavior-changing task in this repository.
 
 1. Run focused backend and frontend tests.
 2. Run `./scripts/verify-build-deploy.sh --verify-only` before handoff when
-   Docker is available. This executes all tests and builds both production
+   Podman is available. This executes all tests and builds both production
    images.
 3. For UI changes, exercise the affected workflow in a browser at desktop and
    narrow widths. Confirm loading, success, error, keyboard, and refresh states.
@@ -63,4 +63,3 @@ Use this workflow for every behavior-changing task in this repository.
 Record optional UX or architecture improvements separately from the requested
 fix. Explain the user benefit and risk, and obtain approval before implementing
 an enhancement that changes scope or product behavior.
-

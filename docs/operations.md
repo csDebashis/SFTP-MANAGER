@@ -1,9 +1,31 @@
 # Operations guide
 
+## Podman host prerequisites
+
+The supported container engine is rootless Podman. Install Podman and the
+`podman-compose` provider before deploying. Linux hosts run Podman natively.
+macOS hosts require a Podman machine:
+
+```bash
+podman machine init
+podman machine start
+podman info
+PODMAN_COMPOSE_PROVIDER=podman-compose podman compose version
+```
+
+Use Podman's official macOS installer for the most stable operator setup. When
+the default Apple HyperVisor provider cannot boot on Apple Silicon, install
+`krunkit` from the official `libkrun/krun` Homebrew tap, remove only the broken
+empty machine, and initialize its replacement with `--provider libkrun`.
+
+The deployment and verification script sets `PODMAN_COMPOSE_PROVIDER` to
+`podman-compose`, so an installed Docker-compatible provider is never selected
+implicitly.
+
 ## Operational logging
 
 The backend writes the same redacted JSON-lines records to stdout and to a
-rotating file. The Compose deployment bind-mounts the repository-local,
+rotating file. The Podman Compose deployment bind-mounts the repository-local,
 Git-ignored host directory:
 
 ```text
@@ -34,40 +56,40 @@ template, status, and duration. Query strings and payloads are not recorded.
 | `ERROR` | HTTP 5xx completion and unexpected request failure |
 | `CRITICAL` | Process safety or data-integrity failure requiring intervention |
 
-Set these environment variables before running Compose:
+Set these environment variables before running Podman Compose:
 
 | Variable | Default | Meaning |
 |---|---:|---|
 | `LOG_LEVEL` | `INFO` | Minimum severity; one of `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `LOG_MAX_BYTES` | `10485760` | Rotate the active file after this many bytes |
 | `LOG_BACKUP_COUNT` | `5` | Number of rotated files retained |
-| `APP_LOG_DIR` | `/var/log/sftp-manager` in Compose | Directory containing `application.log` |
+| `APP_LOG_DIR` | `/var/log/sftp-manager` in Podman Compose | Directory containing `application.log` |
 
 Invalid values stop backend startup so logging cannot silently degrade.
 
 ### Viewing logs
 
-Follow stdout through Docker:
+Follow container stdout through Podman:
 
 ```bash
-docker compose logs --follow backend
+podman compose logs --follow backend
 ```
 
 Read the mounted filesystem log:
 
 ```bash
 tail -f logs/application.log
-docker compose exec backend tail -n 100 /var/log/sftp-manager/application.log
+podman compose exec backend tail -n 100 /var/log/sftp-manager/application.log
 ```
 
-Confirm the Compose bind mount:
+Confirm the Podman Compose bind mount:
 
 ```bash
-docker compose config
+podman compose config
 ```
 
 The application never exposes operational files through an HTTP endpoint.
-Access to the Docker host and volume should be limited to operators. Collectors
+Access to the Podman machine and bind mounts should be limited to operators. Collectors
 must preserve JSON lines and apply an independent retention policy before old
 rotations are removed.
 
@@ -86,7 +108,7 @@ and verifies that the backend filesystem log exists and is non-empty.
 
 ## Durable state lifecycle
 
-Compose mounts the Git-ignored host directory
+Podman Compose mounts the Git-ignored host directory
 `/Users/debchowd/SFTP-MANAGER/db` at `/data` in the backend. The active database
 is therefore available on the host as `db/sftp-manager.db` and in the container
 as `/data/sftp-manager.db`. An empty directory is initialized at the current
@@ -98,8 +120,8 @@ backup/restore workflow. Remote SFTP file contents are not stored in SQLite.
 
 Application logs in the host `logs` directory and SQLite in the host `db`
 directory are separate and excluded from Git. When application data may be
-discarded, stop the stack before clearing the `db` directory, then redeploy to
-create a fresh baseline database.
+discarded, stop the stack with `podman compose down` before clearing the `db`
+directory, then redeploy to create a fresh baseline database.
 
 ## Incident correlation
 
