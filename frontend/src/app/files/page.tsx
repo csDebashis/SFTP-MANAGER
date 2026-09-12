@@ -1,5 +1,7 @@
 "use client";
 
+import CheckIcon from "@mui/icons-material/Check";
+import CloseIcon from "@mui/icons-material/Close";
 import CreateNewFolderIcon from "@mui/icons-material/CreateNewFolder";
 import DeleteIcon from "@mui/icons-material/Delete";
 import DownloadIcon from "@mui/icons-material/Download";
@@ -67,6 +69,10 @@ function FileExplorer() {
   const [folderDialog, setFolderDialog] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<FileItem | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [renamePending, setRenamePending] = useState(false);
+  const [renameError, setRenameError] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const currentRoot = useMemo(
@@ -135,15 +141,39 @@ function FileExplorer() {
     }
   }
 
-  async function rename(item: FileItem) {
-    const name = window.prompt("New name", item.name);
-    if (!name || name === item.name) return;
+  function beginRename(item: FileItem) {
+    setError("");
+    setRenameTarget(item);
+    setRenameName(item.name);
+    setRenameError("");
+  }
+
+  function cancelRename() {
+    if (renamePending) return;
+    setRenameTarget(null);
+    setRenameName("");
+    setRenameError("");
+  }
+
+  async function saveRename(item: FileItem) {
+    const name = renameName.trim();
+    if (!name) {
+      setRenameError("A file or folder name is required");
+      return;
+    }
+    if (name === item.name || renamePending) return;
+    setRenamePending(true);
+    setRenameError("");
     try {
       await api("/files/rename", { method: "POST", body: JSON.stringify({ serverId, path: item.path, name }) });
+      setRenameTarget(null);
+      setRenameName("");
       setMessage("Item renamed");
       await loadListing();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Rename failed");
+      setRenameError(reason instanceof Error ? reason.message : "Unable to rename this item");
+    } finally {
+      setRenamePending(false);
     }
   }
 
@@ -262,21 +292,76 @@ function FileExplorer() {
                       <TableHead><TableRow><TableCell>Name</TableCell><TableCell>Size</TableCell><TableCell>Modified</TableCell><TableCell align="right">Actions</TableCell></TableRow></TableHead>
                       <TableBody>
                         {listing.items.length === 0 && <TableRow><TableCell colSpan={4}><Typography color="text.secondary" textAlign="center" py={4}>This folder is empty.</Typography></TableCell></TableRow>}
-                        {listing.items.map((item) => (
-                          <TableRow key={item.path} hover>
-                            <TableCell><Button color="inherit" startIcon={item.type === "folder" ? <FolderIcon color="primary" /> : <InsertDriveFileIcon color="action" />} onClick={() => item.type === "folder" && openPath(item.path)} sx={{ fontWeight: 650 }}>{item.name}</Button></TableCell>
+                        {listing.items.map((item) => {
+                          const isRenaming = renameTarget?.path === item.path;
+                          const renameUnchanged = renameName.trim() === item.name;
+                          return (
+                            <TableRow key={item.path} hover={!isRenaming}>
+                            <TableCell sx={{ minWidth: { xs: 280, md: 380 } }}>
+                              {isRenaming ? (
+                                <Stack direction="row" spacing={0.75} alignItems="flex-start" aria-busy={renamePending}>
+                                  <Box sx={{ pt: 1 }}>
+                                    {item.type === "folder" ? <FolderIcon color="primary" /> : <InsertDriveFileIcon color="action" />}
+                                  </Box>
+                                  <TextField
+                                    autoFocus
+                                    size="small"
+                                    fullWidth
+                                    value={renameName}
+                                    error={Boolean(renameError)}
+                                    helperText={renameError || "Enter to save · Escape to cancel"}
+                                    inputProps={{ "aria-label": `New name for ${item.name}` }}
+                                    onChange={(event) => {
+                                      setRenameName(event.target.value);
+                                      if (renameError) setRenameError("");
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") {
+                                        event.preventDefault();
+                                        void saveRename(item);
+                                      } else if (event.key === "Escape") {
+                                        event.preventDefault();
+                                        cancelRename();
+                                      }
+                                    }}
+                                  />
+                                  <Tooltip title="Save rename">
+                                    <span>
+                                      <IconButton
+                                        color="primary"
+                                        aria-label={`Save rename for ${item.name}`}
+                                        disabled={renamePending || !renameName.trim() || renameUnchanged}
+                                        onClick={() => void saveRename(item)}
+                                      >
+                                        {renamePending ? <CircularProgress size={20} /> : <CheckIcon />}
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip title="Cancel rename">
+                                    <span>
+                                      <IconButton aria-label={`Cancel rename for ${item.name}`} disabled={renamePending} onClick={cancelRename}>
+                                        <CloseIcon />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </Stack>
+                              ) : (
+                                <Button color="inherit" startIcon={item.type === "folder" ? <FolderIcon color="primary" /> : <InsertDriveFileIcon color="action" />} onClick={() => item.type === "folder" && openPath(item.path)} sx={{ fontWeight: 650 }}>{item.name}</Button>
+                              )}
+                            </TableCell>
                             <TableCell>{item.type === "file" ? formatBytes(item.size) : "—"}</TableCell>
                             <TableCell>{new Date(item.modifiedAt * 1000).toLocaleString()}</TableCell>
                             <TableCell align="right">
                               <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
                                 {item.type === "file" && can("DOWNLOAD") && <Tooltip title="Download"><IconButton aria-label={`Download ${item.name}`} component="a" href={`/api/v1/files/download?serverId=${encodeURIComponent(serverId)}&path=${encodeURIComponent(item.path)}`}><DownloadIcon /></IconButton></Tooltip>}
-                                {can("RENAME") && <Tooltip title="Rename"><IconButton aria-label={`Rename ${item.name}`} onClick={() => void rename(item)}><EditIcon /></IconButton></Tooltip>}
-                                {can("MOVE") && <Tooltip title="Move"><IconButton aria-label={`Move ${item.name}`} onClick={() => void move(item)}><DriveFileMoveIcon /></IconButton></Tooltip>}
-                                {can("DELETE") && <Tooltip title="Delete"><IconButton color="error" aria-label={`Delete ${item.name}`} onClick={() => void remove(item)}><DeleteIcon /></IconButton></Tooltip>}
+                                {can("RENAME") && !isRenaming && <Tooltip title="Rename"><IconButton aria-label={`Rename ${item.name}`} disabled={renamePending} onClick={() => beginRename(item)}><EditIcon /></IconButton></Tooltip>}
+                                {can("MOVE") && <Tooltip title="Move"><IconButton aria-label={`Move ${item.name}`} disabled={isRenaming} onClick={() => void move(item)}><DriveFileMoveIcon /></IconButton></Tooltip>}
+                                {can("DELETE") && <Tooltip title="Delete"><IconButton color="error" aria-label={`Delete ${item.name}`} disabled={isRenaming} onClick={() => void remove(item)}><DeleteIcon /></IconButton></Tooltip>}
                               </Box>
                             </TableCell>
-                          </TableRow>
-                        ))}
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </TableContainer>

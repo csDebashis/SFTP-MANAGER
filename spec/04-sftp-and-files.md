@@ -74,6 +74,14 @@ The explorer provides server and access-root selection, breadcrumbs bounded by t
 
 - Create-folder requires `CREATE_FOLDER` on the parent.
 - Rename requires `RENAME` on the parent and rejects collisions with HTTP 409.
+  Selecting Rename replaces that row's displayed file/folder name with a
+  pre-populated inline text field; native browser prompt/alert input is not
+  used. Save and Cancel controls remain beside the field, Enter saves, and
+  Escape cancels. While saving, the inline Save control shows progress and
+  conflicting actions for that row are disabled. A successful rename closes
+  the editor, refreshes the listing, and shows confirmation; a validation or
+  API failure keeps the editor open and displays readable highlighted guidance
+  directly below its field.
 - Move is limited to one configured SFTP server. It requires `MOVE` at the source parent and `UPLOAD` for a file or `CREATE_FOLDER` for a folder at the destination parent. Both paths must remain within authorized roots.
 - File deletion and empty-folder deletion require `DELETE` on the parent.
 - Non-empty folder deletion returns HTTP 409. Recursive delete is not supported.
