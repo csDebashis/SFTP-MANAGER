@@ -967,11 +967,24 @@ def create_app(
 ) -> FastAPI:
     """Build an isolated application instance and its process-local services."""
 
-    database_url = database_url or os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./sftp-manager.db")
-    mock_root_path = Path(mock_root or os.getenv("MOCK_SFTP_ROOT", "./mock-sftp"))
+    vercel_runtime = os.getenv("VERCEL", "").strip().lower() in {"1", "true"}
+    vercel_data_root = Path(os.getenv("VERCEL_TMP_DIR", "/tmp")) / "sftp-manager"
+    database_url = database_url or os.getenv("DATABASE_URL") or (
+        f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
+        if vercel_runtime
+        else "sqlite+aiosqlite:///./sftp-manager.db"
+    )
+    mock_root_path = Path(
+        mock_root
+        or os.getenv("MOCK_SFTP_ROOT")
+        or (vercel_data_root / "mock-sftp" if vercel_runtime else "./mock-sftp")
+    )
     if seed_demo is None:
         seed_demo = os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
-    logger = configure_logging(log_directory)
+    resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or (
+        vercel_data_root / "logs" if vercel_runtime else "./logs"
+    )
+    logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1010,6 +1023,7 @@ def create_app(
     app.state.gateway = SftpGateway(mock_root_path)
     app.state.logger = logger
     app.state.seed_demo = seed_demo
+    app.state.vercel_demo = vercel_runtime
     app.state.upload_locks = {}
     app.state.upload_target_locks = {}
 
@@ -1224,7 +1238,7 @@ def create_app(
         db.add(Session(id_hash=token_hash(raw_session), user_id=user.id, csrf_hash=token_hash(csrf), expires_at=expires))
         await add_audit(db, request, "LOGIN", "session", actor=user)
         await db.commit()
-        secure_cookie = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+        secure_cookie = os.getenv("COOKIE_SECURE", "true" if vercel_runtime else "false").lower() == "true"
         response.set_cookie("sftp_session", raw_session, httponly=True, secure=secure_cookie, samesite="lax", max_age=28800, path="/")
         response.set_cookie("sftp_csrf", csrf, httponly=False, secure=secure_cookie, samesite="lax", max_age=28800, path="/")
         return {"user": user_json(user), "csrfToken": csrf}

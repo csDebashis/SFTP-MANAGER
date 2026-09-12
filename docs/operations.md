@@ -1,5 +1,32 @@
 # Operations guide
 
+## Vercel demonstration deployment
+
+Import the repository root from the `vercel` branch. The root `vercel.json`
+defines a Next.js frontend service, a FastAPI backend service, and ordered
+same-domain routing. Select the **Services** framework preset during import if
+it is not detected automatically.
+
+When Vercel sets `VERCEL=1`, the backend defaults to these writable paths:
+
+| Resource | Vercel demo path |
+|---|---|
+| SQLite | `/tmp/sftp-manager/sftp-manager.db` |
+| Mock SFTP | `/tmp/sftp-manager/mock-sftp` |
+| Application log | `/tmp/sftp-manager/logs/application.log` |
+
+This mode seeds the documented demo users and enables secure cookies by
+default. The paths are local to one stateless service instance and can disappear
+on scale-down, replacement, or deployment; concurrent instances do not share
+them. Production SFTP credentials and production data must never be entered in
+this mode. No Git configuration can safely provision production secrets or a
+durable external database during an unattended repository import.
+
+Use the Compose deployment for durable operation. A future production Vercel
+topology must first replace local SQLite and APScheduler ownership with durable
+external coordination, move logs to an external sink, and configure secrets in
+Vercel rather than committing them.
+
 ## Operational logging
 
 The backend writes the same redacted JSON-lines records to stdout and to a

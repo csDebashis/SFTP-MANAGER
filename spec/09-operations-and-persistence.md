@@ -61,6 +61,29 @@ Deployment must enforce:
 - `scripts/verify-build-deploy.sh --verify-only` performs tests and production image builds without deploying.
 - Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. The script must stop before deployment if any prerequisite is missing.
 
+### 12.2 Vercel demonstration deployment
+
+- Importing the repository root from the `vercel` branch deploys the Next.js
+  frontend and FastAPI backend together through Vercel Services. Ordered public
+  rewrites route `/api/*` to FastAPI before routing all other paths to Next.js.
+- The import-ready configuration is demonstration-only. When Vercel identifies
+  its runtime, the backend uses the writable `/tmp/sftp-manager` tree for
+  SQLite, mock SFTP files, and filesystem logs, seeds the documented demo users,
+  and emits secure session cookies unless explicitly overridden.
+- Vercel demonstration state is instance-local and disposable. Scale-down,
+  replacement, redeployment, or routing to another instance may reset or fork
+  accounts, sessions, tasks, audit history, server configuration, and mock SFTP
+  files. Operators must not enter production SFTP credentials or production
+  data in this mode.
+- The Vercel demonstration does not satisfy durable production persistence,
+  continuous scheduler ownership, filesystem-log retention, backup, or
+  single-writer guarantees. Compose remains the supported production runtime.
+- A production Vercel deployment requires separately provisioned durable
+  storage, distributed scheduling and locking, external log collection, and
+  secrets entered through Vercel environment configuration. Secrets must never
+  be committed or synthesized from public deployment metadata, and an
+  unattended Git import cannot securely provision them.
+
 ## 13. SQLite persistence and future scaling
 
 SQLite is the durable system of record for users, sessions, servers, encrypted credentials, grants, task definitions, task instances, idempotency records, and audit events. SQLAlchemy 2.x supplies the data-access layer, and `aiosqlite` supplies asynchronous access. The declared SQLAlchemy metadata and `schema_baseline` marker are the only schema authority; migration scripts and migration dependencies are intentionally absent.

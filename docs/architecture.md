@@ -25,6 +25,14 @@ The frontend and backend have independent Dockerfiles and non-root runtime
 images. Only the frontend is published to the host by the reference Compose
 deployment.
 
+The repository also contains an import-ready Vercel Services demonstration
+topology. Vercel routes `/api/*` directly to the FastAPI service and all other
+paths to the Next.js service under one deployment URL. Because Vercel service
+instances are stateless, the demonstration stores SQLite, mock files, and logs
+under `/tmp`; this state is instance-local and disposable. It does not replace
+the durable Compose topology or satisfy production persistence and scheduler
+ownership requirements.
+
 ## Backend modules
 
 - `app/main.py` owns the application factory, HTTP schemas, route handlers,

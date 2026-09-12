@@ -34,7 +34,28 @@ BACKEND_INTERNAL_URL=http://127.0.0.1:8000 npm run dev
 
 Open `http://localhost:3000`.
 
-## Test, build, and deploy
+## Import into Vercel
+
+Import the repository root and select the `vercel` branch. The committed
+`vercel.json` declares the Next.js frontend and FastAPI backend as one Vercel
+Services deployment, with `/api/*` routed directly to FastAPI and all other
+requests routed to Next.js. In the import screen, use the **Services** framework
+preset if Vercel does not select it automatically.
+
+The zero-configuration Vercel deployment is deliberately a disposable demo. It
+uses the demo accounts above and stores SQLite, mock SFTP files, and filesystem
+logs under the function instance's writable `/tmp` directory. Vercel instances
+are stateless and may scale down or be replaced, so accounts, sessions, tasks,
+audit history, saved servers, and mock files can reset at any time. Different
+instances may also observe different local state. Do not enter production SFTP
+credentials or use this mode for production data.
+
+The Compose deployment below remains the supported durable production runtime.
+Moving production to Vercel requires an external database, distributed
+scheduling/locking, external log collection, and Vercel environment variables
+for all secrets; those resources cannot be securely created from a Git import.
+
+## Test, build, and deploy with Compose
 
 Create the secret files described in `deploy/secrets/README.md`, export `BOOTSTRAP_ADMIN_EMAIL`, and run:
 

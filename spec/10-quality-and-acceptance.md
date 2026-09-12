@@ -113,6 +113,10 @@ Run against a disposable SFTP server and cover:
 - Concurrent-write tests exercise the busy timeout, transaction rollback, task occurrence uniqueness, and idempotency uniqueness.
 - Brute-force, session fixation, CSRF, traversal, malicious filename, oversized upload, CSV injection, stored/reflected XSS, and secret-leak tests.
 - Dependency, static-analysis, and container-image scans.
+- Vercel deployment tests validate that the committed Services configuration
+  routes `/api/*` to FastAPI before the Next.js catch-all, and that the Vercel
+  demo runtime selects writable `/tmp` storage, seeded demo users, and secure
+  cookies without requiring committed secrets.
 
 ## 15. Acceptance criteria and traceability
 
@@ -134,6 +138,7 @@ Run against a disposable SFTP server and cover:
 | `AC-13` | The backend persists application state through SQLAlchemy repository interfaces and SQLite, and repository contract tests permit a later database implementation without API changes. |
 | `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
 | `AC-15` | Primary workflows meet WCAG 2.1 AA and pass the defined functional, integration, authorization, security, and operational test suites. |
+| `AC-16` | Importing the `vercel` branch as a Vercel Services project deploys the Next.js and FastAPI services under one domain and starts a clearly documented disposable demo using writable `/tmp` state and secure cookies; it requires no committed secret, never claims production durability, and leaves Compose as the supported durable production deployment. |
 
 Release approval requires all acceptance criteria to pass in a production-like environment. Any exception must be documented with owner, risk, mitigation, and expiry date.
 
