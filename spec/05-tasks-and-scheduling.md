@@ -77,10 +77,11 @@ Task behavior:
   restarts in SQLite and are displayed in the task UI.
 - The scheduled file checker also lists the definition's exact SFTP folder so
   files delivered outside this portal can complete work. A regular file matches
-  only when its name satisfies the glob and its remote modified time is not
-  earlier than the occurrence's scheduled time. Directories, symbolic links,
-  portal temporary upload objects, older files, other folders, and other servers
-  do not match.
+  whenever its name satisfies the glob, including when the file was already
+  present when the occurrence became due. Remote modified time is informational
+  and is not a completion gate because SFTP server clocks and preserved source
+  timestamps are not reliable delivery indicators. Directories, symbolic links,
+  portal temporary upload objects, other folders, and other servers do not match.
 - A successful portal upload/move or scheduled file check changes the matching
   assignment to `COMPLETED` and records the detection source. A matching-file
   work item has no manual **Complete** action and the API rejects manual

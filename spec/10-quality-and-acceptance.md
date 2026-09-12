@@ -15,9 +15,10 @@ module when its release evidence or acceptance contract changes.
 - Task recurrence across month-end, leap year, timezone, and daylight-saving boundaries.
 - Scheduler startup catch-up, schedule-time first assignment visibility,
   deterministic occurrence uniqueness, exact-folder matching for externally
-  delivered files, selectable 5/10/30-minute, hourly, and daily check cadence,
-  persisted last/next-check timestamps, forced user refresh, absent-file overdue
-  behavior, and recovery from a temporary SFTP scan failure.
+  delivered and already-present files regardless of preserved remote modified
+  time, selectable 5/10/30-minute, hourly, and daily check cadence, persisted
+  last/next-check timestamps, forced user refresh, absent-file overdue behavior,
+  and recovery from a temporary SFTP scan failure.
 - Shared group work-item consistency under member add/remove, automatic filename
   matching, rejection of manual matching-file completion, dismissal, half-time
   urgency, due-frequency bounds, schedule deletion, and overdue transitions.
@@ -107,7 +108,7 @@ Run against a disposable SFTP server and cover:
 | `AC-06` | An Admin can configure password/private-key SFTP servers without entering a host fingerprint; a successful initial connection automatically pins the discovered key, closes the form, and refreshes the server list, while a failed connection saves nothing. An Admin can also confirm server deletion, which atomically removes its credentials, access grants, tasks, and unfinished upload sessions while retaining audit history and remote files. |
 | `AC-07` | An Admin can add, edit, and remove user/group folder grants, see the specific user or group and server on every grant row, and preview effective access; edit failures remain inside a spinner-backed modal and successful saves close it, refresh the list, and show a two-second success notification. |
 | `AC-08` | Admins and authorized Managers can add/edit/delete user- or group-owned one-time/month-end or other supported recurring schedules in modal flows; due time cannot extend past the next frequency, the compact schedule table exposes complete details on hover/focus, and instances are generated once per occurrence. |
-| `AC-09` | A group schedule has one shared work item visible to current members; any member's state change is immediately consistent for all, and membership add/remove immediately changes visibility. Users can start or dismiss matching-file work and navigate directly to its SFTP folder, but cannot manually complete it; completion requires a matching portal/external delivery, uses a selectable 5/10/30-minute, hourly, or daily persisted check cadence, records last check, and supports an authorized immediate refresh. |
+| `AC-09` | A group schedule has one shared work item visible to current members; any member's state change is immediately consistent for all, and membership add/remove immediately changes visibility. Users can start or dismiss matching-file work and navigate directly to its SFTP folder, but cannot manually complete it; completion requires a matching portal/external file in the exact folder, including a file already present or carrying an older preserved modified time, uses a selectable 5/10/30-minute, hourly, or daily persisted check cadence, records last check, and supports an authorized immediate refresh. |
 | `AC-10` | Required authentication, file-content transfer, file/folder mutation, task, access, server, and audit-query actions create immutable, secret-free audit events; successful folder listings do not create or appear as audit events. Source IP/client metadata is serialized only by the dedicated audit endpoint for Admin/Auditor sessions and never by Manager/User or dashboard activity APIs. |
 | `AC-11` | Users see their own and currently authorized-folder events; Admins and Auditors can search all events; no role can modify audit history. |
 | `AC-12` | All file content is streamed, paths are canonicalized, symlinks/traversal are rejected, and remote roots cannot be escaped. |

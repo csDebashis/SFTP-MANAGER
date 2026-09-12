@@ -151,6 +151,38 @@ def test_scheduled_folder_check_completes_matching_external_delivery(
     assert event["detail"] == {"fileName": "external-delivery.csv", "detection": "SCHEDULED_FOLDER_CHECK"}
 
 
+def test_folder_check_accepts_a_matching_file_already_present_at_occurrence(
+    client: TestClient,
+    admin_headers: dict[str, str],
+) -> None:
+    """Folder presence, not a remote server's clock, fulfils the file rule."""
+
+    external_file: Path = client.app.state.gateway._mock_path("/shared/sample(1).json")
+    external_file.write_text('{"ready": true}\n', encoding="utf-8")
+    old_timestamp = (datetime.now(timezone.utc) - timedelta(days=1)).timestamp()
+    os.utime(external_file, (old_timestamp, old_timestamp))
+
+    created = client.post(
+        "/api/v1/task-definitions",
+        json=_definition_payload(
+            client,
+            datetime.now(timezone.utc) - timedelta(seconds=1),
+            completionMode="MATCHING_UPLOAD",
+            filenameGlob="sample*.json",
+        ),
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+
+    assert client.portal is not None
+    assert client.portal.call(check_matching_task_files, client.app) == 1
+    task = next(
+        item for item in client.get("/api/v1/tasks").json()["items"]
+        if item["definitionId"] == created.json()["id"]
+    )
+    assert task["status"] == "COMPLETED"
+
+
 def test_future_assignment_becomes_visible_only_at_its_schedule(
     client: TestClient,
     admin_headers: dict[str, str],

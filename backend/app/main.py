@@ -855,9 +855,9 @@ async def check_matching_task_files(
     """Complete active matching-file tasks from SFTP directory state.
 
     This catches files delivered by another approved SFTP client in addition to
-    uploads performed through the portal. A file must be at least as new as the
-    occurrence, preventing a prior period's artifact from completing a newly
-    generated recurring task.
+    uploads performed through the portal. Folder presence is authoritative so a
+    remote server's clock or an already-present matching delivery cannot cause a
+    false negative.
     """
 
     current_time = as_utc(now or utc_now())
@@ -893,7 +893,6 @@ async def check_matching_task_files(
                     extra={"event": "task.file_check.failed", "error_type": type(exc).__name__},
                 )
                 directory_cache[key] = None
-        reference = as_utc(task.scheduled_at or task.created_at)
         matching_item = next(
             (
                 item
@@ -901,7 +900,6 @@ async def check_matching_task_files(
                 if item["type"] == "file"
                 and ".uploading-" not in str(item["name"])
                 and fnmatch.fnmatchcase(str(item["name"]), task.filename_glob or "")
-                and int(float(item["modifiedAt"])) >= int(reference.timestamp())
             ),
             None,
         )
