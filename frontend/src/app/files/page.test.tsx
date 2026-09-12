@@ -156,3 +156,91 @@ describe("inline file and folder rename", () => {
     expect(screen.getByRole("textbox", { name: "New name for report.csv" })).toHaveValue("existing.csv");
   });
 });
+
+describe("same-server move folder picker", () => {
+  beforeEach(() => {
+    apiMock.mockReset();
+    enqueueMock.mockReset();
+    apiMock.mockImplementation((requestPath: string) => {
+      if (requestPath === "/files/roots") {
+        return Promise.resolve({
+          items: [{ serverId: "server-1", serverName: "Finance SFTP", path: "/", permissions: ["LIST", "MOVE", "UPLOAD"] }],
+        });
+      }
+      if (requestPath.includes("path=%2Farchive")) {
+        return Promise.resolve({ path: "/archive", permissions: ["LIST", "UPLOAD"], items: [] });
+      }
+      if (requestPath.startsWith("/files/list")) {
+        return Promise.resolve({
+          path: "/",
+          permissions: ["LIST", "MOVE", "UPLOAD"],
+          items: [
+            { name: "archive", path: "/archive", type: "folder", size: 0, modifiedAt: 1_700_000_000 },
+            { name: "report.csv", path: "/report.csv", type: "file", size: 12, modifiedAt: 1_700_000_000 },
+          ],
+        });
+      }
+      return Promise.resolve({});
+    });
+  });
+
+  it("selects a destination folder in a popup and moves the item without a browser prompt", async () => {
+    const promptSpy = vi.spyOn(window, "prompt");
+    render(<FilesPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Move report.csv" }));
+
+    expect(promptSpy).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Move report.csv" });
+    expect(dialog).toHaveTextContent("Finance SFTP");
+    expect(dialog).toHaveTextContent("Destination folder: /");
+    expect(screen.getByRole("button", { name: "Move here" })).toBeDisabled();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open archive" }));
+
+    expect(await screen.findByText("Destination folder: /archive")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move here" }));
+
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith(
+      "/files/move",
+      { method: "POST", body: JSON.stringify({ serverId: "server-1", source: "/report.csv", destination: "/archive/report.csv" }) },
+    ));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Move report.csv" })).not.toBeInTheDocument());
+    expect(screen.getByText("Item moved")).toBeInTheDocument();
+  });
+
+  it("keeps move failures highlighted inside the destination popup", async () => {
+    apiMock.mockImplementation((requestPath: string) => {
+      if (requestPath === "/files/roots") {
+        return Promise.resolve({
+          items: [{ serverId: "server-1", serverName: "Finance SFTP", path: "/", permissions: ["LIST", "MOVE", "UPLOAD"] }],
+        });
+      }
+      if (requestPath.includes("path=%2Farchive")) {
+        return Promise.resolve({ path: "/archive", permissions: ["LIST", "UPLOAD"], items: [] });
+      }
+      if (requestPath.startsWith("/files/list")) {
+        return Promise.resolve({
+          path: "/",
+          permissions: ["LIST", "MOVE", "UPLOAD"],
+          items: [
+            { name: "archive", path: "/archive", type: "folder", size: 0, modifiedAt: 1_700_000_000 },
+            { name: "report.csv", path: "/report.csv", type: "file", size: 12, modifiedAt: 1_700_000_000 },
+          ],
+        });
+      }
+      if (requestPath === "/files/move") return Promise.reject(new Error("A file with this name already exists"));
+      return Promise.resolve({});
+    });
+    render(<FilesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Move report.csv" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open archive" }));
+    await screen.findByText("Destination folder: /archive");
+
+    fireEvent.click(screen.getByRole("button", { name: "Move here" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Move report.csv" });
+    expect(await screen.findByText("A file with this name already exists")).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+  });
+});

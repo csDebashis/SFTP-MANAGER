@@ -82,7 +82,7 @@ The explorer provides server and access-root selection, breadcrumbs bounded by t
   the editor, refreshes the listing, and shows confirmation; a validation or
   API failure keeps the editor open and displays readable highlighted guidance
   directly below its field.
-- Move is limited to one configured SFTP server. It requires `MOVE` at the source parent and `UPLOAD` for a file or `CREATE_FOLDER` for a folder at the destination parent. Both paths must remain within authorized roots.
+- Move is limited to one configured SFTP server. It requires `MOVE` at the source parent and `UPLOAD` for a file or `CREATE_FOLDER` for a folder at the destination parent. Both paths must remain within authorized roots. Selecting Move opens a modal folder picker instead of a native prompt or free-text path field. The picker names the current SFTP server, starts at the item's bounded access root, lists only folders, supports accessible-root and breadcrumb navigation on that server, prevents choosing the current parent or a moved folder's own subtree, and enables **Move here** only when the selected folder has the required destination permission. Folder-loading and move-submit states display a spinner. A successful move closes the dialog, refreshes the source listing, and confirms success; a listing or move error remains highlighted inside the dialog for correction or retry.
 - File deletion and empty-folder deletion require `DELETE` on the parent.
 - Non-empty folder deletion returns HTTP 409. Recursive delete is not supported.
 - Operations that the remote server cannot perform atomically must fail safely and must not report success until the final state is verified.

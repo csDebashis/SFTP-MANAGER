@@ -26,7 +26,12 @@ import {
   IconButton,
   InputLabel,
   Link,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
   MenuItem,
+  Paper,
   Select,
   Snackbar,
   Stack,
@@ -48,6 +53,15 @@ import { uploadDestinationKey, useUploads } from "@/components/UploadManager";
 import type { FileItem, Root } from "@/types";
 
 type Listing = { path: string; permissions: string[]; items: FileItem[] };
+
+function parentPath(value: string): string {
+  const separator = value.lastIndexOf("/");
+  return separator <= 0 ? "/" : value.slice(0, separator);
+}
+
+function childPath(parent: string, name: string): string {
+  return parent === "/" ? `/${name}` : `${parent}/${name}`;
+}
 
 export default function FilesPage() {
   return (
@@ -73,6 +87,13 @@ function FileExplorer() {
   const [renameName, setRenameName] = useState("");
   const [renamePending, setRenamePending] = useState(false);
   const [renameError, setRenameError] = useState("");
+  const [moveTarget, setMoveTarget] = useState<FileItem | null>(null);
+  const [movePath, setMovePath] = useState("/");
+  const [moveListing, setMoveListing] = useState<Listing | null>(null);
+  const [moveLoading, setMoveLoading] = useState(false);
+  const [movePending, setMovePending] = useState(false);
+  const [moveError, setMoveError] = useState("");
+  const moveLoadRequest = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const currentRoot = useMemo(
@@ -80,6 +101,16 @@ function FileExplorer() {
       .filter((root) => root.serverId === serverId && (path === root.path || root.path === "/" || path.startsWith(`${root.path}/`)))
       .sort((a, b) => b.path.length - a.path.length)[0],
     [roots, serverId, path],
+  );
+  const moveServerRoots = useMemo(
+    () => roots.filter((root) => root.serverId === serverId),
+    [roots, serverId],
+  );
+  const moveRoot = useMemo(
+    () => moveServerRoots
+      .filter((root) => movePath === root.path || root.path === "/" || movePath.startsWith(`${root.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0],
+    [moveServerRoots, movePath],
   );
 
   async function loadRoots() {
@@ -109,6 +140,9 @@ function FileExplorer() {
   useEffect(() => { void loadRoots(); }, []);
   const uploadCompletionVersion = completedByDestination[uploadDestinationKey(serverId, path)] || 0;
   useEffect(() => { void loadListing(); }, [serverId, path, uploadCompletionVersion]);
+  useEffect(() => {
+    if (moveTarget) void loadMoveListing(movePath);
+  }, [moveTarget?.path, movePath, serverId]);
 
   const can = (permission: string) => Boolean(listing?.permissions.includes(permission));
   const crumbs = path.split("/").filter(Boolean);
@@ -177,15 +211,55 @@ function FileExplorer() {
     }
   }
 
-  async function move(item: FileItem) {
-    const destination = window.prompt("Destination absolute path", item.path);
-    if (!destination || destination === item.path) return;
+  async function loadMoveListing(destinationFolder: string) {
+    const requestNumber = moveLoadRequest.current + 1;
+    moveLoadRequest.current = requestNumber;
+    setMoveLoading(true);
+    setMoveListing(null);
+    setMoveError("");
     try {
-      await api("/files/move", { method: "POST", body: JSON.stringify({ serverId, source: item.path, destination }) });
+      const value = await api<Listing>(`/files/list?serverId=${encodeURIComponent(serverId)}&path=${encodeURIComponent(destinationFolder)}`);
+      if (requestNumber === moveLoadRequest.current) setMoveListing(value);
+    } catch (reason) {
+      if (requestNumber === moveLoadRequest.current) {
+        setMoveError(reason instanceof Error ? reason.message : "Unable to open this folder");
+      }
+    } finally {
+      if (requestNumber === moveLoadRequest.current) setMoveLoading(false);
+    }
+  }
+
+  function beginMove(item: FileItem) {
+    setError("");
+    setMoveTarget(item);
+    setMovePath(currentRoot?.path || "/");
+    setMoveListing(null);
+    setMoveError("");
+  }
+
+  function cancelMove() {
+    if (movePending) return;
+    moveLoadRequest.current += 1;
+    setMoveTarget(null);
+    setMoveListing(null);
+    setMoveError("");
+  }
+
+  async function submitMove() {
+    if (!moveTarget || movePending) return;
+    const destination = childPath(movePath, moveTarget.name);
+    setMovePending(true);
+    setMoveError("");
+    try {
+      await api("/files/move", { method: "POST", body: JSON.stringify({ serverId, source: moveTarget.path, destination }) });
+      setMoveTarget(null);
+      setMoveListing(null);
       setMessage("Item moved");
       await loadListing();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Move failed");
+      setMoveError(reason instanceof Error ? reason.message : "Unable to move this item");
+    } finally {
+      setMovePending(false);
     }
   }
 
@@ -355,7 +429,7 @@ function FileExplorer() {
                               <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
                                 {item.type === "file" && can("DOWNLOAD") && <Tooltip title="Download"><IconButton aria-label={`Download ${item.name}`} component="a" href={`/api/v1/files/download?serverId=${encodeURIComponent(serverId)}&path=${encodeURIComponent(item.path)}`}><DownloadIcon /></IconButton></Tooltip>}
                                 {can("RENAME") && !isRenaming && <Tooltip title="Rename"><IconButton aria-label={`Rename ${item.name}`} disabled={renamePending} onClick={() => beginRename(item)}><EditIcon /></IconButton></Tooltip>}
-                                {can("MOVE") && <Tooltip title="Move"><IconButton aria-label={`Move ${item.name}`} disabled={isRenaming} onClick={() => void move(item)}><DriveFileMoveIcon /></IconButton></Tooltip>}
+                                {can("MOVE") && <Tooltip title="Move"><IconButton aria-label={`Move ${item.name}`} disabled={isRenaming} onClick={() => beginMove(item)}><DriveFileMoveIcon /></IconButton></Tooltip>}
                                 {can("DELETE") && <Tooltip title="Delete"><IconButton color="error" aria-label={`Delete ${item.name}`} disabled={isRenaming} onClick={() => void remove(item)}><DeleteIcon /></IconButton></Tooltip>}
                               </Box>
                             </TableCell>
@@ -375,6 +449,101 @@ function FileExplorer() {
           <DialogTitle>Create folder</DialogTitle>
           <DialogContent><TextField autoFocus margin="dense" label="Folder name" fullWidth value={folderName} onChange={(event) => setFolderName(event.target.value)} /></DialogContent>
           <DialogActions><Button onClick={() => setFolderDialog(false)}>Cancel</Button><Button variant="contained" onClick={() => void createFolder()} disabled={!folderName.trim()}>Create</Button></DialogActions>
+        </Dialog>
+        <Dialog open={Boolean(moveTarget)} onClose={cancelMove} maxWidth="sm" fullWidth>
+          <DialogTitle>{moveTarget ? `Move ${moveTarget.name}` : "Move item"}</DialogTitle>
+          <DialogContent>
+            {moveTarget && (
+              <Stack spacing={2} sx={{ pt: 0.5 }}>
+                <Typography color="text.secondary">
+                  Choose another folder on <strong>{currentRoot?.serverName || "this SFTP server"}</strong>. The item name will not change.
+                </Typography>
+                {moveServerRoots.length > 1 && (
+                  <FormControl fullWidth>
+                    <InputLabel>Accessible location</InputLabel>
+                    <Select
+                      label="Accessible location"
+                      value={moveRoot?.path || movePath}
+                      disabled={movePending}
+                      onChange={(event) => setMovePath(String(event.target.value))}
+                    >
+                      {moveServerRoots.map((root) => (
+                        <MenuItem key={root.path} value={root.path}>{root.serverName} — {root.path}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
+                <Breadcrumbs aria-label="Move destination path">
+                  <Link
+                    component="button"
+                    underline="hover"
+                    disabled={movePending}
+                    onClick={() => moveRoot && setMovePath(moveRoot.path)}
+                  >
+                    {moveRoot?.serverName || currentRoot?.serverName || "SFTP server"} — {moveRoot?.path || "/"}
+                  </Link>
+                  {movePath.split("/").filter(Boolean).slice((moveRoot?.path || "/").split("/").filter(Boolean).length).map((segment, index) => {
+                    const rootSegments = (moveRoot?.path || "/").split("/").filter(Boolean);
+                    const relativeSegments = movePath.split("/").filter(Boolean).slice(rootSegments.length, rootSegments.length + index + 1);
+                    const destination = `/${[...rootSegments, ...relativeSegments].join("/")}`;
+                    return <Link component="button" underline="hover" disabled={movePending} key={destination} onClick={() => setMovePath(destination)}>{segment}</Link>;
+                  })}
+                </Breadcrumbs>
+                <Paper variant="outlined" sx={{ minHeight: 128, maxHeight: 280, overflow: "auto" }}>
+                  {moveLoading ? (
+                    <Stack alignItems="center" justifyContent="center" sx={{ minHeight: 128 }} role="status" aria-label="Loading destination folders">
+                      <CircularProgress size={28} />
+                    </Stack>
+                  ) : (
+                    <List aria-label="Destination folders" disablePadding>
+                      {(moveListing?.items || []).filter((item) => item.type === "folder").map((folder) => {
+                        const insideMovedFolder = moveTarget.type === "folder"
+                          && (folder.path === moveTarget.path || folder.path.startsWith(`${moveTarget.path}/`));
+                        return (
+                          <ListItemButton
+                            key={folder.path}
+                            disabled={movePending || insideMovedFolder}
+                            aria-label={`Open ${folder.name}`}
+                            onClick={() => setMovePath(folder.path)}
+                          >
+                            <ListItemIcon><FolderIcon color={insideMovedFolder ? "disabled" : "primary"} /></ListItemIcon>
+                            <ListItemText primary={folder.name} secondary={insideMovedFolder ? "Cannot move a folder into itself" : folder.path} />
+                          </ListItemButton>
+                        );
+                      })}
+                      {!moveLoading && moveListing && moveListing.items.every((item) => item.type !== "folder") && (
+                        <Typography color="text.secondary" textAlign="center" sx={{ py: 4, px: 2 }}>No child folders here.</Typography>
+                      )}
+                    </List>
+                  )}
+                </Paper>
+                <Typography fontWeight={650} aria-live="polite">Destination folder: {movePath}</Typography>
+                {parentPath(moveTarget.path) === movePath && (
+                  <Typography variant="body2" color="text.secondary">Choose a different folder to move this item.</Typography>
+                )}
+                {moveError && <Alert severity="error">{moveError}</Alert>}
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ justifyContent: "flex-start", px: 3, pb: 2.5 }}>
+            <Button
+              variant="contained"
+              startIcon={movePending ? <CircularProgress size={18} color="inherit" /> : <DriveFileMoveIcon />}
+              disabled={
+                !moveTarget
+                || moveLoading
+                || movePending
+                || moveListing?.path !== movePath
+                || !moveListing?.permissions.includes(moveTarget.type === "folder" ? "CREATE_FOLDER" : "UPLOAD")
+                || parentPath(moveTarget.path) === movePath
+                || (moveTarget.type === "folder" && (movePath === moveTarget.path || movePath.startsWith(`${moveTarget.path}/`)))
+              }
+              onClick={() => void submitMove()}
+            >
+              {movePending ? "Moving…" : "Move here"}
+            </Button>
+            <Button disabled={movePending} onClick={cancelMove}>Cancel</Button>
+          </DialogActions>
         </Dialog>
         <Snackbar open={Boolean(message)} autoHideDuration={3500} onClose={() => setMessage("")} message={message} />
       </Stack>
