@@ -40,6 +40,7 @@ def test_vercel_runtime_uses_tmp_storage_and_secure_demo_sessions(monkeypatch, t
     app = create_app()
 
     assert app.state.vercel_demo is True
+    assert app.state.durable_database is False
     assert app.state.seed_demo is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
@@ -72,6 +73,7 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     app = create_app()
 
     assert app.state.vercel_demo is True
+    assert app.state.durable_database is False
     assert app.state.seed_demo is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
@@ -79,3 +81,22 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
         assert client.get("/api/v1/health/ready").json() == {"status": "ready"}
 
     assert (tmp_path / "sftp-manager" / "logs" / "application.log").is_file()
+
+
+def test_vercel_uses_configured_postgres_for_durable_sessions(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("VERCEL_TMP_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://app:secret@example-pooler.neon.tech/appdb?sslmode=require",
+    )
+    monkeypatch.setenv("SEED_DEMO_USERS", "false")
+
+    app = create_app()
+
+    assert app.state.vercel_demo is False
+    assert app.state.durable_database is True
+    assert app.state.seed_demo is False
+    assert app.state.database.url.startswith("postgresql+asyncpg://app:secret@")
+    assert "sslmode" not in app.state.database.url
+    assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()

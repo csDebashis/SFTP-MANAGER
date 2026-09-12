@@ -11,7 +11,10 @@ Only Admins may create, edit, enable, disable, test, rotate credentials for, or 
 Each server contains:
 
 - Unique ID, display name, description, host, port, username, authentication type, configured remote root, pinned host-key fingerprint, enabled state, connection/operation timeouts, created/updated metadata, and integer version.
-- Either a password or a private key and optional passphrase. Secrets are encrypted with AES-256-GCM using a key supplied through `APP_CREDENTIAL_ENCRYPTION_KEY_FILE`.
+- Either a password or a private key and optional passphrase. Secrets are
+  encrypted with AES-256-GCM using a key supplied through
+  `APP_CREDENTIAL_ENCRYPTION_KEY_FILE` for containers or
+  `APP_CREDENTIAL_ENCRYPTION_KEY` for serverless deployments.
 - A sanitized last-test result containing timestamp, latency, success/failure, and a safe error code.
 
 Rules:

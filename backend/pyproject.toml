@@ -9,6 +9,7 @@ description = "FastAPI backend for the SFTP Management Portal"
 requires-python = ">=3.12"
 dependencies = [
   "aiosqlite>=0.20,<1",
+  "asyncpg>=0.30,<1",
   "apscheduler>=3.10,<4",
   "argon2-cffi>=23.1,<26",
   "asyncssh>=2.19,<3",

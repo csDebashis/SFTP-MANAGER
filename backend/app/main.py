@@ -31,7 +31,7 @@ from sqlalchemy import and_, case, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db import Database
+from .db import Database, is_postgresql_url
 from .logging_config import configure_logging
 from .models import AuditEvent, FileUpload, FolderGrant, Group, GroupMember, LoginAttempt, Session, SftpServer, Task, TaskDefinition, User, utc_now
 from .security import create_session_tokens, encrypt_credential, hash_password, token_hash, verify_password
@@ -753,14 +753,21 @@ async def bootstrap_admin(app: FastAPI) -> None:
             return
         email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
         password_file = os.getenv("BOOTSTRAP_ADMIN_PASSWORD_FILE", "").strip()
-        if not email or not password_file:
+        password_value = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
+        if not email or not (password_file or password_value):
             if os.getenv("APP_ENV", "development") == "production":
-                raise RuntimeError("BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD_FILE are required for first startup")
+                raise RuntimeError(
+                    "BOOTSTRAP_ADMIN_EMAIL and either BOOTSTRAP_ADMIN_PASSWORD_FILE "
+                    "or BOOTSTRAP_ADMIN_PASSWORD are required for first startup"
+                )
             return
-        password_path = Path(password_file)
-        if not password_path.is_file():
-            raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD_FILE does not exist")
-        password = password_path.read_text(encoding="utf-8").strip()
+        if password_file:
+            password_path = Path(password_file)
+            if not password_path.is_file():
+                raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD_FILE does not exist")
+            password = password_path.read_text(encoding="utf-8").strip()
+        else:
+            password = password_value
         if len(password) < 12:
             raise RuntimeError("bootstrap administrator password must be at least 12 characters")
         admin = User(email=email, display_name="Administrator", password_hash=hash_password(password), role="ADMIN", state="ACTIVE")
@@ -983,20 +990,30 @@ def create_app(
 
     vercel_runtime = _is_vercel_runtime()
     vercel_data_root = Path(os.getenv("VERCEL_TMP_DIR", "/tmp")) / "sftp-manager"
+    configured_database_url = database_url or os.getenv("DATABASE_URL")
+    vercel_durable_database = vercel_runtime and is_postgresql_url(configured_database_url)
     if vercel_runtime:
-        # Repository imports are disposable demos. Ignore inherited filesystem
-        # environment settings that commonly point into Vercel's read-only
-        # application image; direct create_app arguments remain available to tests.
-        database_url = database_url or f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
+        # A PostgreSQL URL opts into durable serverless persistence. Any SQLite
+        # URL inherited from the Compose deployment remains unsafe on Vercel and
+        # falls back to an explicitly disposable /tmp demo.
+        database_url = (
+            configured_database_url
+            if vercel_durable_database
+            else f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
+        )
         configured_mock_root = mock_root or vercel_data_root / "mock-sftp"
         resolved_log_directory = log_directory or vercel_data_root / "logs"
     else:
-        database_url = database_url or os.getenv("DATABASE_URL") or "sqlite+aiosqlite:///./sftp-manager.db"
+        database_url = configured_database_url or "sqlite+aiosqlite:///./sftp-manager.db"
         configured_mock_root = mock_root or os.getenv("MOCK_SFTP_ROOT") or "./mock-sftp"
         resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or "./logs"
     mock_root_path = Path(configured_mock_root)
     if seed_demo is None:
-        seed_demo = True if vercel_runtime else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+        seed_demo = (
+            True
+            if vercel_runtime and not vercel_durable_database
+            else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+        )
     logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager
@@ -1036,7 +1053,8 @@ def create_app(
     app.state.gateway = SftpGateway(mock_root_path)
     app.state.logger = logger
     app.state.seed_demo = seed_demo
-    app.state.vercel_demo = vercel_runtime
+    app.state.vercel_demo = vercel_runtime and not vercel_durable_database
+    app.state.durable_database = app.state.database.dialect == "postgresql"
     app.state.upload_locks = {}
     app.state.upload_target_locks = {}
 

@@ -26,7 +26,9 @@ The product must provide:
 2. Make time-sensitive file work, such as month-end uploads, visible and actionable from the home page.
 3. Give administrators one place to configure SFTP connections and manage least-privilege access.
 4. Make every security-relevant or state-changing action attributable and reviewable.
-5. Persist application state and audit history in SQLite behind repository contracts that permit a later migration to PostgreSQL or another production database.
+5. Persist application state and audit history through database-agnostic
+   SQLAlchemy contracts, using SQLite for Compose and PostgreSQL for durable
+   Vercel deployments.
 
 ### 2.2 Measurable success criteria
 
@@ -36,7 +38,8 @@ The product must provide:
 - A task call-to-action opens its exact server, folder, or administration destination.
 - No API response, application log, or audit event exposes passwords, private keys, passphrases, session tokens, encryption keys, or file contents.
 - Primary UI workflows meet WCAG 2.1 AA requirements.
-- Repository contract tests pass for the SQLite implementation and any future persistent implementation.
+- Repository contract tests pass for the SQLite and PostgreSQL deployment
+  configurations.
 - Under normal network conditions, non-SFTP API requests have a p95 response time below 500 ms; folder listings have a p95 below 3 seconds, excluding remote-server outages.
 
 ## 3. Scope
@@ -54,9 +57,10 @@ The product must provide:
 - One-time and recurring task definitions and generated task instances.
 - In-app task and approval queues.
 - Configurable email for account approval and password-reset messages.
-- Searchable, filterable, durable audit events stored in SQLite.
+- Searchable, filterable, durable audit events stored in SQLite or PostgreSQL.
 - Separate frontend and backend containers orchestrated by Docker Compose.
-- Durable SQLite storage initialized from the current schema baseline.
+- Durable SQLite or PostgreSQL storage initialized from the current schema
+  baseline.
 
 ### 3.2 Excluded from the first release
 

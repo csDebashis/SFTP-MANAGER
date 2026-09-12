@@ -45,21 +45,30 @@ def create_session_tokens() -> tuple[str, str, datetime]:
     )
 
 
+def _decode_encryption_key(raw: bytes) -> bytes:
+    try:
+        decoded = base64.urlsafe_b64decode(raw)
+        if len(decoded) == 32:
+            return decoded
+    except Exception:
+        pass
+    if len(raw) == 32:
+        return raw
+    raise ValueError("credential encryption key must contain 32 bytes or urlsafe base64")
+
+
 def _encryption_key() -> bytes:
     key_file = os.getenv("APP_CREDENTIAL_ENCRYPTION_KEY_FILE")
     if key_file and Path(key_file).is_file():
-        raw = Path(key_file).read_bytes().strip()
-        try:
-            decoded = base64.urlsafe_b64decode(raw)
-            if len(decoded) == 32:
-                return decoded
-        except Exception:
-            pass
-        if len(raw) == 32:
-            return raw
-        raise ValueError("credential encryption key must contain 32 bytes or urlsafe base64")
+        return _decode_encryption_key(Path(key_file).read_bytes().strip())
+    key_value = os.getenv("APP_CREDENTIAL_ENCRYPTION_KEY", "").strip()
+    if key_value:
+        return _decode_encryption_key(key_value.encode("ascii"))
     if os.getenv("APP_ENV", "development") == "production":
-        raise ValueError("APP_CREDENTIAL_ENCRYPTION_KEY_FILE is required in production")
+        raise ValueError(
+            "APP_CREDENTIAL_ENCRYPTION_KEY_FILE or APP_CREDENTIAL_ENCRYPTION_KEY "
+            "is required in production"
+        )
     return hashlib.sha256(b"sftp-manager-development-only-key").digest()
 
 

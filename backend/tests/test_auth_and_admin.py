@@ -31,6 +31,31 @@ def test_bootstrap_admin_is_created_in_sqlite(tmp_path, monkeypatch) -> None:
         assert response.json()["user"]["role"] == "ADMIN"
 
 
+def test_bootstrap_admin_accepts_serverless_environment_secret(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "serverless-owner@example.com")
+    monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "Serverless123!Secure")
+    monkeypatch.delenv("BOOTSTRAP_ADMIN_PASSWORD_FILE", raising=False)
+    app = create_app(
+        f"sqlite+aiosqlite:///{tmp_path / 'serverless-bootstrap.db'}",
+        tmp_path / "mock",
+        seed_demo=False,
+        log_directory=tmp_path / "logs",
+    )
+
+    with TestClient(app) as bootstrap_client:
+        response = bootstrap_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "serverless-owner@example.com",
+                "password": "Serverless123!Secure",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["role"] == "ADMIN"
+
+
 def test_signup_requires_admin_approval(client: TestClient, admin_headers: dict[str, str]) -> None:
     client.cookies.clear()
     signup = client.post(

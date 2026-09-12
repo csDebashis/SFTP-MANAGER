@@ -25,13 +25,14 @@ The frontend and backend have independent Dockerfiles and non-root runtime
 images. Only the frontend is published to the host by the reference Compose
 deployment.
 
-The repository also contains an import-ready Vercel Services demonstration
-topology. Vercel routes `/api/*` directly to the FastAPI service and all other
-paths to the Next.js service under one deployment URL. Because Vercel service
-instances are stateless, the demonstration stores SQLite, mock files, and logs
-under `/tmp`; this state is instance-local and disposable. It does not replace
-the durable Compose topology or satisfy production persistence and scheduler
-ownership requirements.
+The repository also contains an import-ready Vercel Services topology. Vercel
+routes `/api/*` directly to the FastAPI service and all other paths to the
+Next.js service under one deployment URL. A connected PostgreSQL `DATABASE_URL`
+provides durable application state across stateless service instances. Without
+PostgreSQL, the fallback demonstration stores SQLite, mock files, and logs under
+`/tmp`, where they are instance-local and disposable. In either mode, Vercel
+cannot continuously own the in-process scheduler and its filesystem log is not
+durable.
 
 ## Backend modules
 
@@ -40,8 +41,9 @@ ownership requirements.
 - `app/models.py` defines SQLAlchemy entities. Relationships use immutable,
   generated user and resource UUIDs; mutable names and email addresses are not
   identifiers.
-- `app/db.py` configures SQLite, async sessions, foreign-key enforcement, WAL
-  mode, and transactional access.
+- `app/db.py` configures SQLite or PostgreSQL, async sessions, SQLite integrity
+  settings, bounded PostgreSQL pooling, schema validation, and transactional
+  access.
 - `app/security.py` centralizes password hashing, session/token derivation, and
   encrypted SFTP credential handling.
 - `app/sftp/gateway.py` is the trust boundary for canonical remote paths,
@@ -91,8 +93,8 @@ These stores have distinct purposes:
 
 | Store | Purpose | Location | User-visible |
 |---|---|---|---|
-| Audit events | Immutable business/security evidence | SQLite | Subject to audit visibility rules |
-| Application log | Runtime diagnosis and operations | Rotating JSON-lines file and stdout | Never exposed by application APIs |
+| Audit events | Immutable business/security evidence | SQLite (Compose) or PostgreSQL (Vercel) | Subject to audit visibility rules |
+| Application log | Runtime diagnosis and operations | Rotating JSON-lines file and stdout; Vercel files are disposable | Never exposed by application APIs |
 
 Operational logs must contain no request bodies, query strings, cookies,
 credentials, remote banners, file contents, or raw exception messages. Add new

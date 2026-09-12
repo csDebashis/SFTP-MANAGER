@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-from app.db import Database, SchemaBaselineError
+from app.db import Database, SchemaBaselineError, prepare_database_url
 from app.models import Base, CURRENT_SCHEMA_BASELINE
 
 
@@ -37,6 +37,17 @@ def test_empty_database_is_initialized_at_current_baseline(tmp_path: Path) -> No
     with engine.connect() as connection:
         assert connection.scalar(sa.text("SELECT version FROM schema_baseline WHERE id = 1")) == CURRENT_SCHEMA_BASELINE
     engine.dispose()
+
+
+def test_neon_postgres_url_selects_async_driver_and_tls() -> None:
+    url, connect_args = prepare_database_url(
+        "postgresql://app:secret@example-pooler.neon.tech/appdb"
+        "?sslmode=require&channel_binding=require"
+    )
+
+    assert url.drivername == "postgresql+asyncpg"
+    assert dict(url.query) == {}
+    assert connect_args == {"ssl": "require"}
 
 
 def test_current_baseline_can_be_reopened_without_recreating_data(tmp_path: Path) -> None:
