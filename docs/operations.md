@@ -83,15 +83,20 @@ rotations are removed.
 After deploying, `scripts/verify-build-deploy.sh` waits for both health checks
 and verifies that the backend filesystem log exists and is non-empty.
 
-## Durable state and backup
+## Durable state lifecycle
 
-SQLite lives in the `sqlite_data` volume at `/data/sftp-manager.db`. Do not copy
-only the main database file while the service is writing; use SQLite's online
-backup API or stop the backend and capture the database together with its WAL
-state. Remote SFTP file contents are not stored in SQLite.
+Compose mounts the Git-ignored host directory
+`/Users/debchowd/SFTP-MANAGER/db` at `/data` in the backend. The active database
+is therefore available on the host as `db/sftp-manager.db` and in the container
+as `/data/sftp-manager.db`. An empty directory is initialized at the current
+schema baseline during backend startup. Pre-baseline development databases are
+not imported or upgraded, and this deployment does not provide a database
+backup/restore workflow. Remote SFTP file contents are not stored in SQLite.
 
-Application logs in the host `logs` directory and SQLite in its Docker volume
-are separate. Backing up one does not back up the other.
+Application logs in the host `logs` directory and SQLite in the host `db`
+directory are separate and excluded from Git. When application data may be
+discarded, stop the stack before clearing the `db` directory, then redeploy to
+create a fresh baseline database.
 
 ## Incident correlation
 

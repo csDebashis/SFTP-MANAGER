@@ -42,8 +42,10 @@ deployment.
   replaces the append-only business audit trail.
 
 Alembic migrations in `backend/migrations/versions` are the only supported way
-to change the production schema. Add a migration whenever a persisted model
-changes.
+to initialize and change the production schema. Version 1.2 is the baseline;
+new installations initialize an empty database at the current head and do not
+upgrade pre-baseline development data. Add a forward migration whenever a
+persisted model changes after this baseline.
 
 ## Request and authorization flow
 
@@ -95,5 +97,5 @@ When changing behavior:
 1. Update the relevant domain module linked from `SPEC.md`.
 2. Preserve UUID-based relationships and backend authorization.
 3. Add focused backend and/or frontend tests, including failure behavior.
-4. Add an Alembic migration for schema changes.
+4. Add an Alembic migration for persisted-model changes after the v1.2 baseline.
 5. Run `./scripts/verify-build-deploy.sh --verify-only` before review.

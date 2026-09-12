@@ -64,9 +64,13 @@ docker compose exec backend tail -n 100 /var/log/sftp-manager/application.log
 `LOG_LEVEL`, `LOG_MAX_BYTES`, and `LOG_BACKUP_COUNT` control verbosity and
 rotation. Operational logs never replace the immutable SQLite audit history.
 
+Compose mounts durable application data from the Git-ignored host directory
+`/Users/debchowd/SFTP-MANAGER/db`; the active database is
+`./db/sftp-manager.db`.
+
 ## Documentation
 
 - [`SPEC.md`](SPEC.md) — product, security, API, and acceptance requirements
 - [`docs/architecture.md`](docs/architecture.md) — runtime topology and code guide
-- [`docs/operations.md`](docs/operations.md) — logging, health, deployment, and backup operations
+- [`docs/operations.md`](docs/operations.md) — logging, health, deployment, and durable-state operations
 - [`deploy/secrets/README.md`](deploy/secrets/README.md) — local Compose secret setup

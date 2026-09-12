@@ -33,8 +33,11 @@ change must update the smallest applicable module and its acceptance coverage.
 - The explicit user-approved behavior and the relevant module form the product
   contract. Resolve contradictions in the module before implementation.
 - Behavior changes require pytest and/or Vitest coverage in the same change.
-- A migration must preserve existing SQLite data and be tested from both a
-  fresh database and the previous schema.
+- Version 1.2 is the SQLite schema baseline. A new deployment may start with an
+  empty `db` directory, which is initialized at the current Alembic head; no
+  import, backup/restore, or upgrade path from pre-baseline development data is
+  required. Persisted-model changes after this baseline require a forward
+  migration and fresh/previous-schema tests.
 - A failing test must be diagnosed and fixed. If it expresses valid behavior
   that conflicts with another valid interpretation and the specification does
   not decide the issue, ask the product owner to confirm the contract before

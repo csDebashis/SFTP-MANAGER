@@ -29,8 +29,8 @@ services:
       - credential_encryption_key
       - bootstrap_admin_password
     volumes:
-      - sqlite_data:/data
-      - ./logs:/var/log/sftp-manager
+      - /Users/debchowd/SFTP-MANAGER/db:/data
+      - /Users/debchowd/SFTP-MANAGER/logs:/var/log/sftp-manager
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -81,9 +81,6 @@ services:
       start_period: 20s
     networks:
       - app_network
-
-volumes:
-  sqlite_data:
 
 networks:
   app_network:

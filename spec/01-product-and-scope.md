@@ -56,7 +56,7 @@ The product must provide:
 - Configurable email for account approval and password-reset messages.
 - Searchable, filterable, durable audit events stored in SQLite.
 - Separate frontend and backend containers orchestrated by Docker Compose.
-- Durable SQLite storage, schema migrations, backup, and restore procedures.
+- Durable SQLite storage initialized from the current schema baseline.
 
 ### 3.2 Excluded from the first release
 

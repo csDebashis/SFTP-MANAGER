@@ -25,7 +25,7 @@ Owner: Platform operations. Related modules:
 
 ## 12. Configuration and deployment
 
-The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Docker Compose builds each service from its own Dockerfile, connects them on a private network, mounts a named volume at `/data` in the backend for the SQLite database, and bind-mounts the repository-local `./logs` host directory at `/var/log/sftp-manager` for rotating application logs. The host directory resolves to `/Users/debchowd/SFTP-MANAGER/logs` in the reference workspace and is excluded from Git. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems.
+The deployment uses separate containers for the Node.js/React frontend and Python/FastAPI backend. Docker Compose builds each service from its own Dockerfile, connects them on a private network, bind-mounts `/Users/debchowd/SFTP-MANAGER/db` at `/data` for SQLite, and bind-mounts `/Users/debchowd/SFTP-MANAGER/logs` at `/var/log/sftp-manager` for rotating application logs. Both host directories are excluded from Git. The frontend is the only application service exposed to the host and proxies `/api` requests to the backend. Both containers run as non-root users with read-only root filesystems and explicitly declared temporary filesystems.
 
 Required production configuration includes:
 
@@ -34,7 +34,7 @@ Required production configuration includes:
 - Credential-encryption key supplied through a mounted secret file.
 - Bootstrap Admin email and password secret file.
 - SQLite URL defaulting to `sqlite+aiosqlite:////data/sftp-manager.db`.
-- SQLite busy timeout, WAL checkpoint interval, and backup destination.
+- SQLite busy timeout and WAL checkpoint interval.
 - SMTP settings or an explicit configuration disabling self-service password reset.
 - Upload/concurrency/timeout limits.
 - The Node.js API proxy request-body limit defaults to `8mb`, which is large enough for the maximum 8 MiB raw upload chunk while preventing accidental whole-file request buffering. The total-file limit remains independently configurable in the backend.
@@ -45,10 +45,9 @@ The backend must run Alembic migrations before becoming ready and must refuse st
 Deployment must enforce:
 
 - One backend replica with one scheduler owner. Multiple frontend replicas are allowed outside the reference Compose deployment.
-- A persistent Docker volume for `/data`; container replacement must preserve this volume.
-- A separately protected, writable host bind mount from `./logs` to `/var/log/sftp-manager`; application users cannot read it through application APIs, and operator/collector access follows least privilege.
+- A protected, writable host bind mount from `/Users/debchowd/SFTP-MANAGER/db` to `/data`; container replacement must preserve this directory and its SQLite/WAL files.
+- A separately protected, writable host bind mount from `/Users/debchowd/SFTP-MANAGER/logs` to `/var/log/sftp-manager`; application users cannot read it through application APIs, and operator/collector access follows least privilege.
 - SQLite WAL mode, foreign-key enforcement, a busy timeout, and `synchronous=FULL` for all production connections.
-- Nightly online SQLite backups using the SQLite backup API, integrity verification, retention policy, and periodic restore tests.
 - Network egress restricted to configured SFTP and SMTP destinations where the platform permits it.
 - Metrics and readiness endpoints restricted to the deployment platform or monitoring network.
 - Coordinated backend upgrades so only one scheduler owner writes task occurrences during migration.
@@ -57,23 +56,23 @@ Deployment must enforce:
 
 - `backend/Dockerfile` is a multi-stage Python image with separate `test` and `runtime` targets. The runtime target installs the application wheel, runs Alembic migrations, and starts one Uvicorn worker as a non-root user.
 - `frontend/Dockerfile` is a multi-stage Node.js image with separate `test`, `build`, and `runtime` targets. The runtime target starts the optimized Next.js application as a non-root user.
-- `compose.yaml` builds the two runtime targets, exposes only the frontend, waits for backend readiness, mounts the durable `sqlite_data` volume and Git-ignored host `./logs` directory, and injects secrets as files.
-- `scripts/verify-build-deploy.sh` is the supported local release entry point. By default it builds and runs both test targets, validates Compose, builds production images, creates and validates the writable host log directory, deploys with `docker compose up --detach --remove-orphans --wait`, verifies the same non-empty backend log through both container and host paths, and prints service status.
+- `compose.yaml` builds the two runtime targets, exposes only the frontend, waits for backend readiness, mounts the Git-ignored host `db` and `logs` directories, and injects secrets as files.
+- `scripts/verify-build-deploy.sh` is the supported local release entry point. By default it builds and runs both test targets, validates Compose, builds production images, creates and validates both writable host persistence directories, deploys with `docker compose up --detach --remove-orphans --wait`, verifies the non-empty log through both container and host paths, verifies SQLite through both paths with `PRAGMA integrity_check`, and prints service status.
 - `scripts/verify-build-deploy.sh --verify-only` performs tests and production image builds without deploying.
 - Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. The script must stop before deployment if any prerequisite is missing.
 
 ## 13. SQLite persistence and future scaling
 
-SQLite is the durable system of record for users, sessions, servers, encrypted credentials, grants, task definitions, task instances, idempotency records, and audit events. SQLAlchemy 2.x supplies the data-access layer, `aiosqlite` supplies asynchronous access, and Alembic supplies forward-only production migrations.
+SQLite is the durable system of record for users, sessions, servers, encrypted credentials, grants, task definitions, task instances, idempotency records, and audit events. SQLAlchemy 2.x supplies the data-access layer, `aiosqlite` supplies asynchronous access, and Alembic initializes an empty database at the current schema head and supplies forward-only migrations after this baseline.
 
 SQLite requirements:
 
 - Enable foreign keys on every connection and use WAL journal mode.
-- Store the database on a durable local block/filesystem volume that supports POSIX locking; do not place the live database on NFS or object storage.
+- Store the database in `/Users/debchowd/SFTP-MANAGER/db` on a durable local filesystem that supports POSIX locking; do not place the live database on NFS or object storage.
 - Apply unique constraints for normalized email, group name, task occurrence key, and scoped idempotency key.
 - Index audit timestamp/action/actor/server/path fields, active sessions, grant lookups, and pending task due times.
 - Run migrations as a one-shot startup step before the API accepts traffic.
-- Produce consistent online backups through the SQLite backup API, validate backups with `PRAGMA integrity_check`, and test restores.
-- Set and document recovery objectives based on backup frequency and retention. WAL files must be included in operational monitoring and checkpointed safely.
+- Treat version 1.2 as the schema baseline: an empty host `db` directory is initialized automatically, and importing or upgrading pre-baseline development databases is outside scope.
+- No database backup or restore workflow is required for this deployment; operators may intentionally stop the stack, clear the host `db` directory, and start from a fresh baseline when data can be discarded.
 
 Repository interfaces must remain database-agnostic so a future PostgreSQL migration does not change route or service contracts. Before horizontal backend scaling, replace SQLite or prove a supported shared-storage topology, add distributed session/idempotency behavior, and use a distributed scheduler or leader-election mechanism.

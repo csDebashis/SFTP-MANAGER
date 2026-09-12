@@ -28,6 +28,7 @@ fi
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 application_log_dir="$project_dir/logs"
+database_dir="$project_dir/db"
 cd "$project_dir"
 
 require_command() {
@@ -90,11 +91,14 @@ do
   fi
 done
 
-mkdir -p "$application_log_dir"
-if [ ! -w "$application_log_dir" ]; then
-  printf 'Application log directory is not writable: %s\n' "$application_log_dir" >&2
-  exit 1
-fi
+for persistence_dir in "$application_log_dir" "$database_dir"
+do
+  mkdir -p "$persistence_dir"
+  if [ ! -w "$persistence_dir" ]; then
+    printf 'Host persistence directory is not writable: %s\n' "$persistence_dir" >&2
+    exit 1
+  fi
+done
 
 printf '%s\n' 'Deploying the stack and waiting for healthy services...'
 docker compose up --detach --remove-orphans --wait
@@ -105,6 +109,14 @@ docker compose exec -T backend python -c \
   "from pathlib import Path; path = Path('/var/log/sftp-manager/application.log'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty application log: {path}'"
 if [ ! -s "$application_log_dir/application.log" ]; then
   printf 'Missing or empty host application log: %s\n' "$application_log_dir/application.log" >&2
+  exit 1
+fi
+
+printf '%s\n' 'Verifying the host-mounted SQLite database...'
+docker compose exec -T backend python -c \
+  "import sqlite3; from pathlib import Path; path = Path('/data/sftp-manager.db'); assert path.is_file() and path.stat().st_size > 0, f'Missing or empty SQLite database: {path}'; connection = sqlite3.connect(path); result = connection.execute('PRAGMA integrity_check').fetchone()[0]; connection.close(); assert result == 'ok', f'SQLite integrity check failed: {result}'"
+if [ ! -s "$database_dir/sftp-manager.db" ]; then
+  printf 'Missing or empty host SQLite database: %s\n' "$database_dir/sftp-manager.db" >&2
   exit 1
 fi
 

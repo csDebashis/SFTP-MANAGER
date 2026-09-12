@@ -23,7 +23,7 @@ module when its release evidence or acceptance contract changes.
   matching, rejection of manual matching-file completion, dismissal, urgency
   thresholds, due-frequency bounds, schedule deletion, and overdue transitions.
 - Audit visibility, event immutability, metadata redaction, and CSV escaping.
-- SQLAlchemy repository transactions, constraints, migration behavior, and shared contract suite.
+- SQLAlchemy repository transactions, constraints, fresh baseline initialization, and shared contract suite.
 
 ### 14.2 Integration tests
 
@@ -91,10 +91,12 @@ Run against a disposable SFTP server and cover:
 - Operational logging tests cover every supported severity, HTTP status mapping, valid JSON-lines output, request-ID/route correlation, rotation settings, persistent container filesystem output, and exclusion of query strings, payloads, credentials, raw exceptions, IP addresses, and client metadata.
 - Compose deployment tests verify that `/var/log/sftp-manager/application.log`
   is the same non-empty file exposed in the Git-ignored host
-  `/Users/debchowd/SFTP-MANAGER/logs` directory.
+  `/Users/debchowd/SFTP-MANAGER/logs` directory, and that
+  `/data/sftp-manager.db` is the same valid SQLite database exposed in the
+  Git-ignored host `/Users/debchowd/SFTP-MANAGER/db` directory.
 - Health endpoints and metrics reflect scheduler and remote-server failures correctly.
 - Restart and container replacement preserve SQLite records and do not affect remote files.
-- Backup integrity and restore drills recover users, grants, tasks, encrypted credentials, and audit history.
+- Fresh-start tests initialize the current schema in an empty host `db` directory without requiring import or migration of pre-baseline development data.
 - Concurrent-write tests exercise the busy timeout, transaction rollback, task occurrence uniqueness, and idempotency uniqueness.
 - Brute-force, session fixation, CSRF, traversal, malicious filename, oversized upload, CSV injection, stored/reflected XSS, and secret-leak tests.
 - Dependency, static-analysis, and container-image scans.
@@ -117,7 +119,7 @@ Run against a disposable SFTP server and cover:
 | `AC-11` | Users see their own and currently authorized-folder events; Admins and Auditors can search all events; no role can modify audit history. |
 | `AC-12` | All file content is streamed, paths are canonicalized, symlinks/traversal are rejected, and remote roots cannot be escaped. |
 | `AC-13` | The backend persists application state through SQLAlchemy repository interfaces and SQLite, and repository contract tests permit a later database implementation without API changes. |
-| `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the SQLite volume, while remote SFTP files remain unchanged. |
+| `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
 | `AC-15` | Primary workflows meet WCAG 2.1 AA and pass the defined functional, integration, authorization, security, and operational test suites. |
 
 Release approval requires all acceptance criteria to pass in a production-like environment. Any exception must be documented with owner, risk, mitigation, and expiry date.

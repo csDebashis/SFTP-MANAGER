@@ -20,6 +20,7 @@ htmlcov/
 coverage/
 *.log
 /logs/
+/db/
 *.db
 *.db-*
 *.sqlite
