@@ -49,6 +49,20 @@ VALIDATION_FIELD_LABELS = {
 }
 
 
+def _is_vercel_runtime() -> bool:
+    """Detect Vercel even when system environment variables are not exposed."""
+
+    if os.getenv("VERCEL", "").strip().lower() in {"1", "true"}:
+        return True
+    current_directory = Path.cwd().resolve()
+    vercel_task_root = Path("/var/task")
+    return (
+        current_directory == vercel_task_root
+        or vercel_task_root in current_directory.parents
+        or not os.access(current_directory, os.W_OK)
+    )
+
+
 def as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
@@ -967,7 +981,7 @@ def create_app(
 ) -> FastAPI:
     """Build an isolated application instance and its process-local services."""
 
-    vercel_runtime = os.getenv("VERCEL", "").strip().lower() in {"1", "true"}
+    vercel_runtime = _is_vercel_runtime()
     vercel_data_root = Path(os.getenv("VERCEL_TMP_DIR", "/tmp")) / "sftp-manager"
     database_url = database_url or os.getenv("DATABASE_URL") or (
         f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"

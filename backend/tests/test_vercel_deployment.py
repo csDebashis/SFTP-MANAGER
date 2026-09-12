@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app.main import _is_vercel_runtime, create_app
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -54,3 +54,20 @@ def test_vercel_runtime_uses_tmp_storage_and_secure_demo_sessions(monkeypatch, t
     assert response.status_code == 200
     assert "Secure" in response.headers["set-cookie"]
     assert (tmp_path / "sftp-manager" / "logs" / "application.log").is_file()
+
+
+def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("VERCEL", raising=False)
+    monkeypatch.setenv("VERCEL_TMP_DIR", str(tmp_path))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("MOCK_SFTP_ROOT", raising=False)
+    monkeypatch.delenv("APP_LOG_DIR", raising=False)
+    monkeypatch.setattr("app.main.os.access", lambda *_args: False)
+
+    assert _is_vercel_runtime() is True
+
+    app = create_app()
+
+    assert app.state.vercel_demo is True
+    assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
+    assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
