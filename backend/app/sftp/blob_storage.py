@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import posixpath
+from inspect import isawaitable
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -57,7 +58,14 @@ class VercelBlobMockStorage:
             return None
 
     async def _objects(self, prefix: str) -> list[Any]:
-        return [item async for item in self.client.iter_objects(prefix=prefix)]
+        return [item async for item in self._iter_objects(prefix=prefix)]
+
+    async def _iter_objects(self, *, prefix: str, limit: int | None = None) -> AsyncIterator[Any]:
+        objects = self.client.iter_objects(prefix=prefix, limit=limit)
+        if isawaitable(objects):
+            objects = await objects
+        async for item in objects:
+            yield item
 
     async def _kind(self, path: str) -> str | None:
         if self._logical(path) == "/":
@@ -67,7 +75,7 @@ class VercelBlobMockStorage:
         if await self._head_optional(self._folder_marker(path)) is not None:
             return "folder"
         prefix = f"{self._file_key(path).rstrip('/')}/"
-        async for _item in self.client.iter_objects(prefix=prefix, limit=1):
+        async for _item in self._iter_objects(prefix=prefix, limit=1):
             return "folder"
         return None
 
@@ -78,7 +86,7 @@ class VercelBlobMockStorage:
         prefix = f"{self._file_key(path).rstrip('/')}/"
         folders: dict[str, float] = {}
         files: dict[str, dict[str, Any]] = {}
-        async for item in self.client.iter_objects(prefix=prefix):
+        async for item in self._iter_objects(prefix=prefix):
             relative = item.pathname[len(prefix):]
             if not relative or relative == FOLDER_MARKER:
                 continue

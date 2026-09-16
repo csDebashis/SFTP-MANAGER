@@ -80,6 +80,21 @@ class FakeBlobClient:
         self.closed = True
 
 
+class AwaitableIteratorBlobClient(FakeBlobClient):
+    async def iter_objects(self, *, prefix: str | None = None, limit: int | None = None, **_kwargs):  # type: ignore[no-untyped-def]
+        async def items():  # type: ignore[no-untyped-def]
+            count = 0
+            for path in sorted(self.objects):
+                if prefix is not None and not path.startswith(prefix):
+                    continue
+                yield self._metadata(path)
+                count += 1
+                if limit is not None and count >= limit:
+                    return
+
+        return items()
+
+
 async def bytes_iterator(content: bytes):  # type: ignore[no-untyped-def]
     yield content
 
@@ -139,3 +154,12 @@ async def test_blob_mock_storage_preserves_file_and_folder_mutation_contracts() 
     await storage.delete("/shared/incoming/welcome.txt")
     await storage.delete("/shared/incoming")
     assert [item["name"] for item in await storage.list("/shared")] == []
+
+
+@pytest.mark.asyncio
+async def test_blob_mock_storage_supports_awaitable_sdk_object_iterator() -> None:
+    storage = VercelBlobMockStorage("test-token", client=AwaitableIteratorBlobClient())
+
+    await storage.seed()
+
+    assert [item["name"] for item in await storage.list("/")] == ["finance", "shared"]
