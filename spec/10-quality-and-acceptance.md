@@ -121,6 +121,10 @@ Run against a disposable SFTP server and cover:
   cookies without requiring committed secrets, even when optional Vercel system
   variables are absent or inherited container settings target read-only paths
   and Docker-only secret files.
+- Hosted deployment checks verify that `main` requires pull requests and the
+  successful Vercel status, that non-production branches create Preview
+  deployments, and that only merged `main` commits create Production
+  deployments for the public demo domains.
 - Deployment-mode tests verify that demo mode normalizes legacy seeded email
   addresses without changing user IDs, production mode disables demo seeding
   and public credentials, and Vercel production mode rejects non-PostgreSQL
@@ -149,7 +153,7 @@ Run against a disposable SFTP server and cover:
 | `AC-13` | The backend persists application state through SQLAlchemy repository interfaces using SQLite for Compose or PostgreSQL for Vercel without changing API contracts. |
 | `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
 | `AC-15` | Primary workflows meet WCAG 2.1 AA and pass the defined functional, integration, authorization, security, and operational test suites. |
-| `AC-16` | Importing the `vercel` branch as a Vercel Services project deploys the Next.js and FastAPI services under one domain and starts a clearly documented disposable demo using writable `/tmp` state and secure cookies when PostgreSQL is absent; it requires no committed secret and never claims fallback-mode durability. The login fields start empty, while the demo-only footer publishes working Admin and User credentials. |
+| `AC-16` | Importing the repository with `main` as the Vercel Production Branch deploys the Next.js and FastAPI services under one domain. GitHub permits changes to protected `main` only through pull requests with a successful Vercel Preview status, and only a merged `main` commit updates the Production public-demo domains. The deployment starts a clearly documented disposable demo using writable `/tmp` database/log state and secure cookies when PostgreSQL is absent; it requires no committed secret and never claims fallback-mode durability. The login fields start empty, while the demo-only footer publishes working Admin and User credentials. Preview and Production use separate Blob prefixes. |
 | `AC-17` | Supplying a TLS-enabled PostgreSQL `DATABASE_URL` to the Vercel backend switches it from disposable demo persistence to durable shared persistence for users, sessions, configuration, tasks, idempotency records, and audit events; concurrent cold starts serialize baseline initialization and serverless secrets are read only from protected environment variables. |
 | `AC-18` | Selecting `DEPLOYMENT_MODE=production` disables demo account seeding and removes published credentials from the login UI; Vercel refuses this mode without PostgreSQL. Selecting `demo` exposes only the documented footer credentials, and both documented accounts can authenticate with their advertised roles. |
 
