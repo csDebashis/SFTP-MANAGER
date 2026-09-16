@@ -91,6 +91,12 @@ Deployment must enforce:
   `BOOTSTRAP_ADMIN_PASSWORD`. SFTP credentials use the serverless secret
   `APP_CREDENTIAL_ENCRYPTION_KEY`. Secret values must be stored only in Vercel
   environment configuration and never committed.
+- `DEPLOYMENT_MODE` is the authoritative `demo`/`production` selector when set.
+  Demo mode seeds and normalizes the documented accounts and permits their
+  publication only in the login footer. Production mode disables demo seeding
+  and public credential disclosure, and Vercel startup rejects production mode
+  unless `DATABASE_URL` selects PostgreSQL. `SEED_DEMO_USERS` remains a
+  compatibility fallback when the selector is absent.
 - Vercel demonstration mode does not satisfy durable production persistence,
   continuous scheduler ownership, filesystem-log retention, backup, or
   single-writer guarantees. Compose remains the supported production runtime.

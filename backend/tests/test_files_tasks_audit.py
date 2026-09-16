@@ -170,7 +170,7 @@ def test_file_audit_request_metadata_is_visible_only_to_audit_roles(
 
     events = client.get("/api/v1/audit-events").json()["items"]
     event = next(item for item in events if item["action"] == "FILE_UPLOAD" and item["itemName"] == "audit-sample.txt")
-    assert event["actorDisplay"] == "user@gmail.com"
+    assert event["actorDisplay"] == "user@example.com"
     assert event["serverName"] == "Mock SFTP"
     assert event["path"] == "/shared/audit-sample.txt"
     assert event["folderPath"] == "/shared"
@@ -187,7 +187,7 @@ def test_file_audit_request_metadata_is_visible_only_to_audit_roles(
     assert stored == ("203.0.113.42", "Audit Browser/1.0")
 
     client.cookies.clear()
-    login(client, "admin@gmail.com", "Admin123!Secure")
+    login(client, "admin@example.com", "Admin123!Secure")
     admin_events = client.get("/api/v1/audit-events").json()["items"]
     admin_event = next(item for item in admin_events if item["id"] == event["id"])
     assert admin_event["sourceIp"] == "203.0.113.42"
@@ -297,7 +297,7 @@ def test_concurrent_uploads_cannot_silently_overwrite_the_same_target(
 
 
 def test_csrf_is_required_for_mutation(client: TestClient) -> None:
-    response = client.post("/api/v1/auth/login", json={"email": "user@gmail.com", "password": "User123!Secure"})
+    response = client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": "User123!Secure"})
     assert response.status_code == 200
     root_item = root(client)
     denied = client.post(
@@ -308,8 +308,8 @@ def test_csrf_is_required_for_mutation(client: TestClient) -> None:
 
 
 def test_task_transitions_and_reopen_authorization(client: TestClient, user_headers: dict[str, str]) -> None:
-    admin_headers = login(client, "admin@gmail.com", "Admin123!Secure")
-    assignee_id = next(user["id"] for user in client.get("/api/v1/users").json()["items"] if user["email"] == "user@gmail.com")
+    admin_headers = login(client, "admin@example.com", "Admin123!Secure")
+    assignee_id = next(user["id"] for user in client.get("/api/v1/users").json()["items"] if user["email"] == "user@example.com")
     server_id = client.get("/api/v1/sftp-servers").json()["items"][0]["id"]
     created = client.post(
         "/api/v1/task-definitions",
@@ -331,7 +331,7 @@ def test_task_transitions_and_reopen_authorization(client: TestClient, user_head
         headers=admin_headers,
     )
     assert created.status_code == 201, created.text
-    user_headers = login(client, "user@gmail.com", "User123!Secure")
+    user_headers = login(client, "user@example.com", "User123!Secure")
     task = next(item for item in client.get("/api/v1/tasks").json()["items"] if item["definitionId"] == created.json()["id"])
     completed = client.post(f"/api/v1/tasks/{task['id']}/complete", headers=user_headers)
     assert completed.status_code == 200
@@ -341,7 +341,7 @@ def test_task_transitions_and_reopen_authorization(client: TestClient, user_head
     assert client.post(f"/api/v1/tasks/{task['id']}/reopen", headers=user_headers).status_code == 403
 
     client.cookies.clear()
-    admin_headers = login(client, "admin@gmail.com", "Admin123!Secure")
+    admin_headers = login(client, "admin@example.com", "Admin123!Secure")
     reopened = client.post(f"/api/v1/tasks/{task['id']}/reopen", headers=admin_headers)
     assert reopened.status_code == 200
     assert reopened.json()["status"] == "PENDING"

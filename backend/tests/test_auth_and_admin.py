@@ -1,22 +1,81 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
+from app.db import Database
 from app.main import create_app
+from app.models import User
+from app.security import hash_password
 from .conftest import login
 
 
 def test_seeded_admin_and_user_can_login(client: TestClient) -> None:
-    admin = client.post("/api/v1/auth/login", json={"email": "admin@gmail.com", "password": "Admin123!Secure"})
+    admin = client.post("/api/v1/auth/login", json={"email": "admin@example.com", "password": "Admin123!Secure"})
     assert admin.status_code == 200
     assert admin.json()["user"]["role"] == "ADMIN"
 
     client.cookies.clear()
-    user = client.post("/api/v1/auth/login", json={"email": "user@gmail.com", "password": "User123!Secure"})
+    user = client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": "User123!Secure"})
     assert user.status_code == 200
     assert user.json()["user"]["role"] == "USER"
+
+
+def test_demo_seed_renames_legacy_accounts_without_changing_ids(tmp_path) -> None:
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'legacy-demo.db'}"
+
+    async def create_legacy_accounts() -> None:
+        database = Database(database_url)
+        await database.initialize()
+        async with database.sessions() as session:
+            session.add_all(
+                [
+                    User(
+                        id="legacy-admin-id",
+                        email="admin@gmail.com",
+                        display_name="Legacy Administrator",
+                        password_hash=hash_password("OldAdmin123!Secure"),
+                        role="ADMIN",
+                        state="ACTIVE",
+                    ),
+                    User(
+                        id="legacy-user-id",
+                        email="user@gmail.com",
+                        display_name="Legacy User",
+                        password_hash=hash_password("OldUser123!Secure"),
+                        role="USER",
+                        state="ACTIVE",
+                    ),
+                ]
+            )
+            await session.commit()
+        await database.close()
+
+    asyncio.run(create_legacy_accounts())
+    app = create_app(database_url, tmp_path / "mock", seed_demo=True)
+
+    with TestClient(app) as demo_client:
+        admin = demo_client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.com", "password": "Admin123!Secure"},
+        )
+        assert admin.status_code == 200
+        users = demo_client.get("/api/v1/users").json()["items"]
+        assert next(user for user in users if user["email"] == "admin@example.com")["id"] == "legacy-admin-id"
+        assert next(user for user in users if user["email"] == "user@example.com")["id"] == "legacy-user-id"
+
+        demo_client.cookies.clear()
+        assert demo_client.post(
+            "/api/v1/auth/login",
+            json={"email": "user@example.com", "password": "User123!Secure"},
+        ).status_code == 200
+        demo_client.cookies.clear()
+        assert demo_client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@gmail.com", "password": "Admin123!Secure"},
+        ).status_code == 401
 
 
 def test_bootstrap_admin_is_created_in_sqlite(tmp_path, monkeypatch) -> None:
@@ -69,7 +128,7 @@ def test_signup_requires_admin_approval(client: TestClient, admin_headers: dict[
     assert dashboard.status_code == 403
 
     client.cookies.clear()
-    admin_headers = login(client, "admin@gmail.com", "Admin123!Secure")
+    admin_headers = login(client, "admin@example.com", "Admin123!Secure")
     users = client.get("/api/v1/users").json()["items"]
     pending = next(user for user in users if user["email"] == "pending@example.com")
     approved = client.post(f"/api/v1/users/{pending['id']}/approve", json={"role": "USER"}, headers=admin_headers)
@@ -83,7 +142,7 @@ def test_signup_requires_admin_approval(client: TestClient, admin_headers: dict[
 
 def test_admin_can_manage_groups_and_grants(client: TestClient, admin_headers: dict[str, str]) -> None:
     users = client.get("/api/v1/users").json()["items"]
-    mock_user = next(user for user in users if user["email"] == "user@gmail.com")
+    mock_user = next(user for user in users if user["email"] == "user@example.com")
     server = client.get("/api/v1/sftp-servers").json()["items"][0]
 
     group = client.post(
@@ -255,8 +314,8 @@ def test_password_change_revokes_sessions(client: TestClient, user_headers: dict
     )
     assert changed.status_code == 200
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.post("/api/v1/auth/login", json={"email": "user@gmail.com", "password": "User123!Secure"}).status_code == 401
-    assert client.post("/api/v1/auth/login", json={"email": "user@gmail.com", "password": "User456!Secure"}).status_code == 200
+    assert client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": "User123!Secure"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": "User456!Secure"}).status_code == 200
 
 
 def test_user_can_update_own_name_and_email_without_changing_generated_id(client: TestClient, user_headers: dict[str, str]) -> None:
@@ -264,7 +323,7 @@ def test_user_can_update_own_name_and_email_without_changing_generated_id(client
 
     response = client.patch(
         f"/api/v1/users/{original['id']}",
-        json={"displayName": "Updated User", "email": "Updated.User@Gmail.com"},
+        json={"displayName": "Updated User", "email": "Updated.User@Example.com"},
         headers=user_headers,
     )
 
@@ -272,7 +331,7 @@ def test_user_can_update_own_name_and_email_without_changing_generated_id(client
     updated = response.json()
     assert updated["id"] == original["id"]
     assert updated["displayName"] == "Updated User"
-    assert updated["email"] == "updated.user@gmail.com"
+    assert updated["email"] == "updated.user@example.com"
     assert client.get("/api/v1/auth/me").json()["user"] == updated
     assert all(root["serverId"] for root in client.get("/api/v1/files/roots").json()["items"])
     assert any(task["assigneeId"] == original["id"] for task in client.get("/api/v1/tasks").json()["items"])
@@ -287,19 +346,19 @@ def test_user_can_update_own_name_and_email_without_changing_generated_id(client
     assert set(audit["detail"]["changedFields"]) == {"displayName", "email"}
 
     client.cookies.clear()
-    assert client.post("/api/v1/auth/login", json={"email": "user@gmail.com", "password": "User123!Secure"}).status_code == 401
-    assert client.post("/api/v1/auth/login", json={"email": "updated.user@gmail.com", "password": "User123!Secure"}).status_code == 200
+    assert client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": "User123!Secure"}).status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "updated.user@example.com", "password": "User123!Secure"}).status_code == 200
 
 
 def test_user_profile_updates_enforce_user_id_scope_and_unique_email(client: TestClient, admin_headers: dict[str, str]) -> None:
-    admin = next(user for user in client.get("/api/v1/users").json()["items"] if user["email"] == "admin@gmail.com")
+    admin = next(user for user in client.get("/api/v1/users").json()["items"] if user["email"] == "admin@example.com")
     client.cookies.clear()
-    user_headers = login(client, "user@gmail.com", "User123!Secure")
+    user_headers = login(client, "user@example.com", "User123!Secure")
     current = client.get("/api/v1/auth/me").json()["user"]
 
     assert client.patch(f"/api/v1/users/{current['id']}", json={"role": "ADMIN"}, headers=user_headers).status_code == 403
     assert client.patch(f"/api/v1/users/{admin['id']}", json={"displayName": "Not allowed"}, headers=user_headers).status_code == 403
-    duplicate = client.patch(f"/api/v1/users/{current['id']}", json={"email": "ADMIN@GMAIL.COM"}, headers=user_headers)
+    duplicate = client.patch(f"/api/v1/users/{current['id']}", json={"email": "ADMIN@EXAMPLE.COM"}, headers=user_headers)
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "Email address is already in use"
 
@@ -312,7 +371,7 @@ def test_login_rate_limit(client: TestClient) -> None:
 
 
 def test_last_active_admin_cannot_be_demoted(client: TestClient, admin_headers: dict[str, str]) -> None:
-    admin = next(user for user in client.get("/api/v1/users").json()["items"] if user["email"] == "admin@gmail.com")
+    admin = next(user for user in client.get("/api/v1/users").json()["items"] if user["email"] == "admin@example.com")
     response = client.patch(
         f"/api/v1/users/{admin['id']}",
         json={"role": "USER"},

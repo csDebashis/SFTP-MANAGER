@@ -55,6 +55,8 @@ Run against a disposable SFTP server and cover:
 ### 14.4 UI and accessibility tests
 
 - Signup, pending approval, approval, login, logout, reset, password change, and self-service display-name/email updates by immutable user ID.
+- Login tests verify empty initial fields, exact usable demo credentials in the
+  demo-only footer, and complete credential suppression in production mode.
 - Dashboard/task ordering (overdue then recent pending), orange due-soon and red
   overdue treatments without a visible half-time message, lifecycle status,
   labeled due date/time, non-visual accessible urgency, matching-file refresh,
@@ -119,6 +121,10 @@ Run against a disposable SFTP server and cover:
   cookies without requiring committed secrets, even when optional Vercel system
   variables are absent or inherited container settings target read-only paths
   and Docker-only secret files.
+- Deployment-mode tests verify that demo mode normalizes legacy seeded email
+  addresses without changing user IDs, production mode disables demo seeding
+  and public credentials, and Vercel production mode rejects non-PostgreSQL
+  persistence.
 - PostgreSQL deployment tests validate Neon-style URL normalization to asyncpg,
   mandatory TLS propagation, durable-mode selection, container-secret fallback,
   and serverless environment-secret loading without exposing values.
@@ -143,8 +149,9 @@ Run against a disposable SFTP server and cover:
 | `AC-13` | The backend persists application state through SQLAlchemy repository interfaces using SQLite for Compose or PostgreSQL for Vercel without changing API contracts. |
 | `AC-14` | Restarting or replacing containers preserves users, configuration, sessions, tasks, and audit history through the host-mounted `/Users/debchowd/SFTP-MANAGER/db` SQLite directory, preserves operational logs through `/Users/debchowd/SFTP-MANAGER/logs`, and leaves remote SFTP files unchanged. |
 | `AC-15` | Primary workflows meet WCAG 2.1 AA and pass the defined functional, integration, authorization, security, and operational test suites. |
-| `AC-16` | Importing the `vercel` branch as a Vercel Services project deploys the Next.js and FastAPI services under one domain and starts a clearly documented disposable demo using writable `/tmp` state and secure cookies when PostgreSQL is absent; it requires no committed secret and never claims fallback-mode durability. |
+| `AC-16` | Importing the `vercel` branch as a Vercel Services project deploys the Next.js and FastAPI services under one domain and starts a clearly documented disposable demo using writable `/tmp` state and secure cookies when PostgreSQL is absent; it requires no committed secret and never claims fallback-mode durability. The login fields start empty, while the demo-only footer publishes working Admin and User credentials. |
 | `AC-17` | Supplying a TLS-enabled PostgreSQL `DATABASE_URL` to the Vercel backend switches it from disposable demo persistence to durable shared persistence for users, sessions, configuration, tasks, idempotency records, and audit events; concurrent cold starts serialize baseline initialization and serverless secrets are read only from protected environment variables. |
+| `AC-18` | Selecting `DEPLOYMENT_MODE=production` disables demo account seeding and removes published credentials from the login UI; Vercel refuses this mode without PostgreSQL. Selecting `demo` exposes only the documented footer credentials, and both documented accounts can authenticate with their advertised roles. |
 
 Release approval requires all acceptance criteria to pass in a production-like environment. Any exception must be documented with owner, risk, mitigation, and expiry date.
 

@@ -81,6 +81,12 @@ Authorization rules:
 #### Login and sessions
 
 - Login accepts email and password and returns the same generic failure response for unknown users, incorrect passwords, rejected accounts, and suspended accounts.
+- Login email and password inputs are empty on every initial render and never
+  contain seeded credentials as default form values.
+- In `demo` deployment mode, the login footer publishes the usable
+  `admin@example.com` / `Admin123!Secure` Admin account and
+  `user@example.com` / `User123!Secure` User account. In `production`
+  deployment mode, the footer and all other public UI omit those credentials.
 - Pending users are authenticated only far enough to reach the pending-approval page.
 - Passwords are hashed with Argon2id using current OWASP-recommended parameters.
 - The browser receives an opaque, cryptographically random session identifier in a `Secure`, `HttpOnly`, `SameSite=Lax` cookie.

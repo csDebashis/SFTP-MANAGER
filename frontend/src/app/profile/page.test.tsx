@@ -11,7 +11,7 @@ vi.mock("@/api/client", () => ({ api: apiMock }));
 vi.mock("@/components/AppShell", () => ({ default: ({ children }: { children: ReactNode }) => <>{children}</> }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: replaceMock }) }));
 
-const user = { id: "signup-generated-user-id", email: "user@gmail.com", displayName: "Mock User", role: "USER", state: "ACTIVE", timezone: "UTC", version: 1 };
+const user = { id: "signup-generated-user-id", email: "user@example.com", displayName: "Mock User", role: "USER", state: "ACTIVE", timezone: "UTC", version: 1 };
 
 describe("Profile and security dialogs", () => {
   beforeEach(() => {

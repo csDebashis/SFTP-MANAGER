@@ -42,6 +42,12 @@ ALL_PERMISSIONS = {"LIST", "DOWNLOAD", "UPLOAD", "CREATE_FOLDER", "RENAME", "MOV
 WRITE_PERMISSIONS = {"UPLOAD", "CREATE_FOLDER", "RENAME", "MOVE", "DELETE", "MANAGE_TASKS"}
 ROLES = {"ADMIN", "MANAGER", "USER", "AUDITOR"}
 USER_STATES = {"PENDING_APPROVAL", "ACTIVE", "SUSPENDED", "REJECTED"}
+DEMO_ADMIN_EMAIL = "admin@example.com"
+DEMO_ADMIN_PASSWORD = "Admin123!Secure"
+DEMO_USER_EMAIL = "user@example.com"
+DEMO_USER_PASSWORD = "User123!Secure"
+LEGACY_DEMO_ADMIN_EMAIL = "admin@gmail.com"
+LEGACY_DEMO_USER_EMAIL = "user@gmail.com"
 VALIDATION_FIELD_LABELS = {
     "path": "Folder path",
     "rootPath": "Remote root",
@@ -683,25 +689,54 @@ async def seed_demo_data(app: FastAPI) -> None:
     if not app.state.seed_demo:
         return
     async with app.state.database.sessions() as db:
-        existing = await db.scalar(select(User.id).where(User.email == "admin@gmail.com"))
-        if existing:
-            return
-        admin = User(
-            email="admin@gmail.com",
-            display_name="Mock Administrator",
-            password_hash=hash_password(os.getenv("MOCK_ADMIN_PASSWORD", "Admin123!Secure")),
-            role="ADMIN",
-            state="ACTIVE",
-        )
-        mock_user = User(
-            email="user@gmail.com",
-            display_name="Mock User",
-            password_hash=hash_password(os.getenv("MOCK_USER_PASSWORD", "User123!Secure")),
-            role="USER",
-            state="ACTIVE",
-        )
-        db.add_all([admin, mock_user])
+        admin = await db.scalar(select(User).where(User.email == DEMO_ADMIN_EMAIL))
+        if admin is None:
+            admin = await db.scalar(select(User).where(User.email == LEGACY_DEMO_ADMIN_EMAIL))
+        if admin is None:
+            admin = User(
+                email=DEMO_ADMIN_EMAIL,
+                display_name="Mock Administrator",
+                password_hash="",
+                role="ADMIN",
+                state="ACTIVE",
+            )
+            db.add(admin)
+        admin.email = DEMO_ADMIN_EMAIL
+        admin.display_name = "Mock Administrator"
+        admin.password_hash = hash_password(DEMO_ADMIN_PASSWORD)
+        admin.role = "ADMIN"
+        admin.state = "ACTIVE"
+
+        mock_user = await db.scalar(select(User).where(User.email == DEMO_USER_EMAIL))
+        if mock_user is None:
+            mock_user = await db.scalar(select(User).where(User.email == LEGACY_DEMO_USER_EMAIL))
+        if mock_user is None:
+            mock_user = User(
+                email=DEMO_USER_EMAIL,
+                display_name="Mock User",
+                password_hash="",
+                role="USER",
+                state="ACTIVE",
+            )
+            db.add(mock_user)
+        mock_user.email = DEMO_USER_EMAIL
+        mock_user.display_name = "Mock User"
+        mock_user.password_hash = hash_password(DEMO_USER_PASSWORD)
+        mock_user.role = "USER"
+        mock_user.state = "ACTIVE"
+
         await db.flush()
+        existing_server = await db.scalar(
+            select(SftpServer.id).where(
+                SftpServer.name == "Mock SFTP",
+                SftpServer.adapter_type == "MOCK",
+            )
+        )
+        if existing_server:
+            await db.commit()
+            seed_mock_files(app.state.gateway.mock_root)
+            return
+
         server = SftpServer(
             name="Mock SFTP",
             description="Local deterministic SFTP workspace for development and validation",
@@ -1008,11 +1043,20 @@ def create_app(
         configured_mock_root = mock_root or os.getenv("MOCK_SFTP_ROOT") or "./mock-sftp"
         resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or "./logs"
     mock_root_path = Path(configured_mock_root)
+    deployment_mode = os.getenv("DEPLOYMENT_MODE", "").strip().lower()
+    if deployment_mode not in {"", "demo", "production"}:
+        raise RuntimeError("DEPLOYMENT_MODE must be either 'demo' or 'production'")
+    if deployment_mode == "production" and vercel_runtime and not vercel_durable_database:
+        raise RuntimeError("DEPLOYMENT_MODE=production requires a PostgreSQL DATABASE_URL on Vercel")
     if seed_demo is None:
         seed_demo = (
-            True
-            if vercel_runtime and not vercel_durable_database
-            else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+            deployment_mode == "demo"
+            if deployment_mode
+            else (
+                True
+                if vercel_runtime and not vercel_durable_database
+                else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+            )
         )
     logger = configure_logging(resolved_log_directory)
 
@@ -1053,6 +1097,7 @@ def create_app(
     app.state.gateway = SftpGateway(mock_root_path)
     app.state.logger = logger
     app.state.seed_demo = seed_demo
+    app.state.deployment_mode = "demo" if seed_demo else "production"
     app.state.vercel_demo = vercel_runtime and not vercel_durable_database
     app.state.durable_database = app.state.database.dialect == "postgresql"
     app.state.upload_locks = {}

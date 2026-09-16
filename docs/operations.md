@@ -21,10 +21,16 @@ Configure these Production environment variables in the Vercel project:
 |---|---|
 | `APP_ENV` | Set to `production` |
 | `DATABASE_URL` | Provider-managed PostgreSQL connection URL |
-| `SEED_DEMO_USERS` | Set to `false` |
+| `DEPLOYMENT_MODE` | Set to `production` |
 | `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | Secret with at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | Secret containing 32 bytes or URL-safe base64 for 32 bytes |
+
+`DEPLOYMENT_MODE=production` disables demo-user seeding and removes all demo
+credentials from the login page. The backend rejects this mode on Vercel when
+`DATABASE_URL` is not PostgreSQL, preventing a disposable deployment from being
+presented as production. `SEED_DEMO_USERS=false` provides the same seed/UI
+behavior only as a compatibility fallback when `DEPLOYMENT_MODE` is unset.
 
 Vercel serverless functions cannot mount Compose secret files. Store the
 password and encryption key as encrypted environment variables, scope them to
@@ -69,6 +75,16 @@ default. The paths are local to one stateless service instance and can disappear
 on scale-down, replacement, or deployment; concurrent instances do not share
 them. Production SFTP credentials and production data must never be entered in
 this mode. Use PostgreSQL mode or Compose for durable application state.
+
+### Public demo mode
+
+Set `DEPLOYMENT_MODE=demo` on both Vercel services. The backend creates or
+normalizes the two documented accounts (`admin@example.com` and
+`user@example.com`) with their published demo passwords, and the login footer
+shows those credentials while leaving both input fields empty. Existing seeded
+`@gmail.com` identities are renamed in place so their UUID-based grants, tasks,
+sessions, and audit relationships remain attached. Demo mode can use PostgreSQL
+when the demonstration needs durable accounts and sessions.
 
 ## Operational logging
 

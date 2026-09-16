@@ -8,10 +8,15 @@ Demo seeding is enabled by default for local development and the reference Compo
 
 | Role | Email | Password |
 |---|---|---|
-| Admin | `admin@gmail.com` | `Admin123!Secure` |
-| User | `user@gmail.com` | `User123!Secure` |
+| Admin | `admin@example.com` | `Admin123!Secure` |
+| User | `user@example.com` | `User123!Secure` |
 
-Set `SEED_DEMO_USERS=false` outside a development or demonstration environment.
+`DEPLOYMENT_MODE=demo` seeds these accounts and shows them in the login-page
+footer; the email and password fields themselves always start empty. Set
+`DEPLOYMENT_MODE=production` outside a development or demonstration
+environment. Production mode disables demo seeding and removes the credential
+footer. `SEED_DEMO_USERS` remains a compatibility fallback only when
+`DEPLOYMENT_MODE` is unset.
 
 ## Run locally
 
@@ -52,7 +57,7 @@ events in PostgreSQL. Set these Production environment variables in Vercel:
 | Variable | Value |
 |---|---|
 | `APP_ENV` | `production` |
-| `SEED_DEMO_USERS` | `false` |
+| `DEPLOYMENT_MODE` | `production` |
 | `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | A secret password of at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | 32 random bytes or their URL-safe base64 encoding |
@@ -63,13 +68,15 @@ and never commit them. Redeploy after connecting the database or changing an
 environment variable. The bootstrap password is used only when no active Admin
 exists, but it should remain protected and be rotated after first login.
 
-Without a PostgreSQL `DATABASE_URL`, the import remains a deliberately
-disposable demo. It seeds the demo accounts above and stores SQLite, mock SFTP
-files, and filesystem logs under the function instance's writable `/tmp`
-directory. That state can reset at any time and must not receive production
-credentials or data. Even in durable PostgreSQL mode, mock SFTP files and the
-local filesystem log are disposable; real file contents remain on the remote
-SFTP server.
+For a public demo such as `sftp-manager.csdebashis.com`, set
+`DEPLOYMENT_MODE=demo`. The same mode works with PostgreSQL for durable demo
+accounts and sessions. Without a PostgreSQL `DATABASE_URL`, the import remains
+a deliberately disposable demo and stores SQLite, mock SFTP files, and
+filesystem logs under the function instance's writable `/tmp` directory. That
+state can reset at any time and must not receive production credentials or
+data. Vercel rejects `DEPLOYMENT_MODE=production` without PostgreSQL. Even in
+durable PostgreSQL mode, mock SFTP files and the local filesystem log are
+disposable; real file contents remain on the remote SFTP server.
 
 Database audit events are durable with PostgreSQL. Runtime logs are emitted to
 Vercel stdout, but Vercel Hobby retains them only for its platform retention
