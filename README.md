@@ -82,10 +82,13 @@ them. Without PostgreSQL the database remains disposable under `/tmp`; Vercel
 rejects `DEPLOYMENT_MODE=production` without PostgreSQL. Real SFTP file contents
 always remain on their configured remote SFTP server.
 
-To deliberately reset a connected demo after pulling its Production variables
-into the shell, run the guarded utility below. It drops and recreates only this
-application's PostgreSQL tables and clears only `BLOB_SFTP_PREFIX`; it does not
-delete the Neon database or Blob store.
+To deliberately reset a connected demo, run the guarded utility below from a
+trusted operator environment where the actual Production values are already
+available as environment variables. Vercel does not reveal stored Secret values
+through `vercel env pull`; `[SENSITIVE]` placeholders cannot perform a reset.
+The utility drops and recreates only this application's PostgreSQL tables and
+clears only `BLOB_SFTP_PREFIX`; it does not delete the Neon database or Blob
+store.
 
 ```bash
 cd backend

@@ -95,7 +95,8 @@ when the demonstration needs durable accounts and sessions.
 
 Create a private Blob store from the Vercel project Storage tab before the
 deployment starts. To deliberately return a connected demo to its seed state,
-pull its Production variables into a protected local environment and run:
+run the following from a trusted operator environment where the actual
+Production values are already present:
 
 ```bash
 cd backend
@@ -105,6 +106,8 @@ python -m scripts.reset_demo_state --confirm RESET-SFTP-MANAGER-DEMO
 The guard requires demo mode, PostgreSQL, Blob credentials, and the exact
 confirmation phrase. It recreates only the application's tables and clears
 only the configured Blob prefix; the Neon database and Blob store remain.
+Vercel intentionally writes `[SENSITIVE]` placeholders instead of stored Secret
+values during `vercel env pull`, so a pulled file alone cannot run this command.
 
 ## Operational logging
 
