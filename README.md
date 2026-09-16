@@ -41,11 +41,18 @@ Open `http://localhost:3000`.
 
 ## Import into Vercel
 
-Import the repository root and select the `vercel` branch. The committed
+Import the repository root and use `main` as the Production Branch. The committed
 `vercel.json` declares the Next.js frontend and FastAPI backend as one Vercel
 Services deployment, with `/api/*` routed directly to FastAPI and all other
 requests routed to Next.js. In the import screen, use the **Services** framework
 preset if Vercel does not select it automatically.
+
+After the initial import, make every change on a topic branch and open a pull
+request into `main`. Vercel creates a Preview deployment for the pull request,
+and the protected branch requires its `Vercel` status to pass before merge.
+Only the merged `main` commit is deployed to Production and assigned to the
+public demo domains. Direct pushes, force pushes, and deletion of `main` are
+blocked, including for repository administrators.
 
 For durable Vercel state, add a PostgreSQL database from the Vercel Marketplace
 (Neon is supported on the free plans) and connect it to this project. Also open
@@ -64,7 +71,7 @@ environment variables in Vercel:
 | `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | A secret password of at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | 32 random bytes or their URL-safe base64 encoding |
-| `BLOB_SFTP_PREFIX` | Optional; defaults to `sftp-manager-demo` |
+| `BLOB_SFTP_PREFIX` | Use `sftp-manager-demo` in Production and a different prefix such as `sftp-manager-preview` in Preview |
 | `MAX_UPLOAD_BYTES` | `10485760` is recommended for the shared public demo |
 
 Vercel cannot mount the Docker secret files used by Compose. Add the two secret

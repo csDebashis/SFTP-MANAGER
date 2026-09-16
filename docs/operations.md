@@ -2,10 +2,24 @@
 
 ## Vercel deployment
 
-Import the repository root from the `vercel` branch. The root `vercel.json`
+Import the repository root and track `main` as the Production Branch. The root `vercel.json`
 defines a Next.js frontend service, a FastAPI backend service, and ordered
 same-domain routing. Select the **Services** framework preset during import if
 it is not detected automatically.
+
+### Git deployment workflow
+
+The GitHub `main` branch is protected and accepts changes only through pull
+requests. Protection applies to administrators, requires the latest branch
+state, resolved review conversations, and a successful `Vercel` status, and
+disables force pushes and branch deletion. Human approvals are not required so
+the repository owner can merge a self-authored pull request after its preview
+passes. GitHub deletes the topic branch after merge.
+
+Vercel Preview deployments are enabled for every non-production branch and
+appear on pull requests. Vercel tracks only `main` for Production, so opening or
+updating a pull request cannot update the public demo domains. Merging the pull
+request creates the Production deployment from the resulting `main` commit.
 
 ### Durable PostgreSQL mode
 
@@ -26,7 +40,7 @@ Configure these Production environment variables in the Vercel project:
 | `BOOTSTRAP_ADMIN_PASSWORD` | Secret with at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | Secret containing 32 bytes or URL-safe base64 for 32 bytes |
 | `BLOB_READ_WRITE_TOKEN` | Added automatically after connecting a private Vercel Blob store; required in demo mode |
-| `BLOB_SFTP_PREFIX` | Optional isolated object prefix; defaults to `sftp-manager-demo` |
+| `BLOB_SFTP_PREFIX` | Use `sftp-manager-demo` in Production and `sftp-manager-preview` in Preview so review activity cannot modify public-demo objects |
 | `MAX_UPLOAD_BYTES` | Use `10485760` (10 MiB) to limit consumption in the shared public demo |
 
 `DEPLOYMENT_MODE=production` disables demo-user seeding and removes all demo

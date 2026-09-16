@@ -63,9 +63,17 @@ Deployment must enforce:
 
 ### 12.2 Vercel deployment
 
-- Importing the repository root from the `vercel` branch deploys the Next.js
+- Importing the repository root with `main` as the Vercel Production Branch
+  deploys the Next.js
   frontend and FastAPI backend together through Vercel Services. Ordered public
   rewrites route `/api/*` to FastAPI before routing all other paths to Next.js.
+- GitHub protects `main` from direct and force pushes and deletion, including by
+  administrators. Every change reaches `main` through a pull request whose
+  latest commit has a successful Vercel Preview status and whose conversations
+  are resolved. A merged `main` commit creates the Production deployment and
+  updates the public demo domains; non-production branches create only Preview
+  deployments. Human approval is optional so a solo owner can merge after the
+  automated gate passes, and merged topic branches are deleted automatically.
 - Without a PostgreSQL `DATABASE_URL`, the import-ready configuration may still
   use `/tmp/sftp-manager` for a disposable SQLite database and filesystem log,
   but demo MOCK files require private Blob and remain durable. When the backend
@@ -80,6 +88,8 @@ Deployment must enforce:
   `BLOB_READ_WRITE_TOKEN` is absent rather than silently storing demo files in
   function-local `/tmp`. A deployment without PostgreSQL still has disposable
   database state and is not an accepted durable demo configuration.
+- Production and Preview deployments use distinct `BLOB_SFTP_PREFIX` values so
+  pull-request testing cannot read or mutate the public demo's MOCK objects.
 - When `DATABASE_URL` selects PostgreSQL, the Vercel backend uses the asyncpg
   SQLAlchemy driver, provider-enforced TLS, a deliberately small local
   connection pool, and a PostgreSQL advisory transaction lock for concurrent
