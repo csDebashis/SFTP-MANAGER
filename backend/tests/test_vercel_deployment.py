@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import _is_vercel_runtime, create_app
+from app.sftp.blob_storage import VercelBlobMockStorage
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +34,7 @@ def test_vercel_services_route_api_before_frontend() -> None:
     ]
 
 
-def test_vercel_runtime_uses_tmp_storage_and_secure_demo_sessions(monkeypatch, tmp_path: Path) -> None:
+def test_vercel_runtime_uses_durable_blob_files_and_secure_demo_sessions(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("VERCEL", "1")
     monkeypatch.setenv("VERCEL_TMP_DIR", str(tmp_path))
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -41,14 +43,18 @@ def test_vercel_runtime_uses_tmp_storage_and_secure_demo_sessions(monkeypatch, t
     monkeypatch.delenv("COOKIE_SECURE", raising=False)
     monkeypatch.delenv("SEED_DEMO_USERS", raising=False)
     monkeypatch.delenv("DEPLOYMENT_MODE", raising=False)
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test-token")
+    monkeypatch.setattr(VercelBlobMockStorage, "seed", AsyncMock())
 
     app = create_app()
 
     assert app.state.vercel_demo is True
     assert app.state.durable_database is False
     assert app.state.seed_demo is True
+    assert app.state.durable_mock_files is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
+    assert app.state.gateway.mock_storage_type == "vercel-blob"
 
     with TestClient(app) as client:
         assert client.get("/api/v1/health/ready").json() == {"status": "ready"}
@@ -70,6 +76,8 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     monkeypatch.setenv("APP_LOG_DIR", "./logs")
     monkeypatch.setenv("SEED_DEMO_USERS", "false")
     monkeypatch.delenv("DEPLOYMENT_MODE", raising=False)
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test-token")
+    monkeypatch.setattr(VercelBlobMockStorage, "seed", AsyncMock())
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.delenv("BOOTSTRAP_ADMIN_PASSWORD_FILE", raising=False)
     monkeypatch.setattr("app.main.os.access", lambda *_args: False)
@@ -81,6 +89,7 @@ def test_read_only_serverless_runtime_uses_tmp_without_vercel_environment(monkey
     assert app.state.vercel_demo is True
     assert app.state.durable_database is False
     assert app.state.seed_demo is True
+    assert app.state.durable_mock_files is True
     assert app.state.database.url == f"sqlite+aiosqlite:///{tmp_path / 'sftp-manager' / 'sftp-manager.db'}"
     assert app.state.gateway.mock_root == (tmp_path / "sftp-manager" / "mock-sftp").resolve()
     with TestClient(app) as client:
@@ -118,11 +127,22 @@ def test_explicit_demo_mode_controls_durable_vercel_seeding(monkeypatch, tmp_pat
     )
     monkeypatch.setenv("DEPLOYMENT_MODE", "demo")
     monkeypatch.setenv("SEED_DEMO_USERS", "false")
+    monkeypatch.setenv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test-token")
 
     app = create_app()
 
     assert app.state.deployment_mode == "demo"
     assert app.state.seed_demo is True
+
+
+def test_vercel_demo_requires_durable_blob_storage(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("VERCEL_TMP_DIR", str(tmp_path))
+    monkeypatch.setenv("DEPLOYMENT_MODE", "demo")
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="requires BLOB_READ_WRITE_TOKEN"):
+        create_app()
 
 
 def test_vercel_production_mode_requires_postgresql(monkeypatch, tmp_path: Path) -> None:

@@ -66,20 +66,20 @@ Deployment must enforce:
 - Importing the repository root from the `vercel` branch deploys the Next.js
   frontend and FastAPI backend together through Vercel Services. Ordered public
   rewrites route `/api/*` to FastAPI before routing all other paths to Next.js.
-- Without a PostgreSQL `DATABASE_URL`, the import-ready configuration runs in
-  demonstration mode. When the backend detects
-  Vercel through its runtime environment, `/var/task` application mount, or a
-  read-only working directory, it uses the writable `/tmp/sftp-manager` tree for
-  SQLite, mock SFTP files, and filesystem logs, seeds the documented demo users,
-  and emits secure session cookies unless explicitly overridden. Inherited
-  filesystem-path and demo-seeding environment settings are ignored in this
-  mode so container defaults cannot redirect writes into the read-only
-  application image or require unavailable Docker secret files.
-- Vercel demonstration state is instance-local and disposable. Scale-down,
-  replacement, redeployment, or routing to another instance may reset or fork
-  accounts, sessions, tasks, audit history, server configuration, and mock SFTP
-  files. Operators must not enter production SFTP credentials or production
-  data in this mode.
+- Without a PostgreSQL `DATABASE_URL`, the import-ready configuration may still
+  use `/tmp/sftp-manager` for a disposable SQLite database and filesystem log,
+  but demo MOCK files require private Blob and remain durable. When the backend
+  detects Vercel through its runtime environment, `/var/task` application mount,
+  or a read-only working directory, inherited filesystem-path and demo-seeding
+  settings are ignored so container defaults cannot redirect writes into the
+  read-only application image or require unavailable Docker secret files.
+- A durable Vercel demonstration connects PostgreSQL and a private Vercel Blob
+  store. PostgreSQL owns accounts, sessions, tasks, audit history, and server
+  configuration; Blob owns the demo MOCK server's folders, resumable chunks,
+  and completed files under `BLOB_SFTP_PREFIX`. Vercel demo startup fails when
+  `BLOB_READ_WRITE_TOKEN` is absent rather than silently storing demo files in
+  function-local `/tmp`. A deployment without PostgreSQL still has disposable
+  database state and is not an accepted durable demo configuration.
 - When `DATABASE_URL` selects PostgreSQL, the Vercel backend uses the asyncpg
   SQLAlchemy driver, provider-enforced TLS, a deliberately small local
   connection pool, and a PostgreSQL advisory transaction lock for concurrent
@@ -97,14 +97,16 @@ Deployment must enforce:
   and public credential disclosure, and Vercel startup rejects production mode
   unless `DATABASE_URL` selects PostgreSQL. `SEED_DEMO_USERS` remains a
   compatibility fallback when the selector is absent.
-- Vercel demonstration mode does not satisfy durable production persistence,
-  continuous scheduler ownership, filesystem-log retention, backup, or
-  single-writer guarantees. Compose remains the supported production runtime.
-- PostgreSQL makes request-driven application state durable, but Vercel
-  Functions still do not provide continuous APScheduler ownership or a durable
-  filesystem. Structured logs go to stdout for Vercel Runtime Logs; longer-term
-  operational-log retention requires a supported external collector or Vercel
-  Log Drain. Immutable application audit events remain durable in PostgreSQL.
+- Vercel demonstration mode does not satisfy production backup, continuous
+  scheduler ownership, filesystem-log retention, or general-purpose SFTP
+  hosting requirements. Its private Blob adapter is for the seeded MOCK server,
+  while Compose remains the supported all-in-one production runtime.
+- PostgreSQL and private Blob make request-driven demo state and MOCK files
+  durable, but Vercel Functions still do not provide continuous APScheduler
+  ownership or a durable filesystem. Structured logs go to stdout for Vercel
+  Runtime Logs; longer-term operational-log retention requires a supported
+  external collector or Vercel Log Drain. Immutable application audit events
+  remain durable in PostgreSQL.
 
 ## 13. SQLite persistence and future scaling
 

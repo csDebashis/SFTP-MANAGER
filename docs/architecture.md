@@ -28,11 +28,12 @@ deployment.
 The repository also contains an import-ready Vercel Services topology. Vercel
 routes `/api/*` directly to the FastAPI service and all other paths to the
 Next.js service under one deployment URL. A connected PostgreSQL `DATABASE_URL`
-provides durable application state across stateless service instances. Without
-PostgreSQL, the fallback demonstration stores SQLite, mock files, and logs under
-`/tmp`, where they are instance-local and disposable. In either mode, Vercel
-cannot continuously own the in-process scheduler and its filesystem log is not
-durable.
+provides durable application state across stateless service instances. A
+connected private Vercel Blob store provides durable file and folder storage for
+the seeded MOCK server. Without PostgreSQL, the fallback database and logs live
+under `/tmp` and remain instance-local; demo startup still requires Blob rather
+than accepting disposable mock files. Vercel cannot continuously own the
+in-process scheduler and its filesystem log is not durable.
 
 ## Backend modules
 

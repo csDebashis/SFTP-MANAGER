@@ -21,10 +21,13 @@ Configure these Production environment variables in the Vercel project:
 |---|---|
 | `APP_ENV` | Set to `production` |
 | `DATABASE_URL` | Provider-managed PostgreSQL connection URL |
-| `DEPLOYMENT_MODE` | Set to `production` |
+| `DEPLOYMENT_MODE` | Set to `demo` for the public demo or `production` for a private install |
 | `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | Secret with at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | Secret containing 32 bytes or URL-safe base64 for 32 bytes |
+| `BLOB_READ_WRITE_TOKEN` | Added automatically after connecting a private Vercel Blob store; required in demo mode |
+| `BLOB_SFTP_PREFIX` | Optional isolated object prefix; defaults to `sftp-manager-demo` |
+| `MAX_UPLOAD_BYTES` | Use `10485760` (10 MiB) to limit consumption in the shared public demo |
 
 `DEPLOYMENT_MODE=production` disables demo-user seeding and removes all demo
 credentials from the login page. The backend rejects this mode on Vercel when
@@ -42,8 +45,9 @@ configuration.
 PostgreSQL persists accounts, sessions, tasks, schedules and occurrences,
 server and grant metadata, transfer state, idempotency records, and audit
 events across cold starts, scaling, and deployments. Actual SFTP file contents
-remain on the configured remote server. The local mock SFTP adapter still uses
-`/tmp` and is not durable.
+remain on the configured remote server. In demo mode, the MOCK adapter stores
+folders, acknowledged upload chunks, and completed files in the connected
+private Blob store rather than `/tmp`.
 
 Vercel Functions do not provide a continuously running process for the
 in-process APScheduler. Manual and request-driven task operations remain
@@ -60,21 +64,24 @@ uses these writable paths:
 | Resource | Vercel demo path |
 |---|---|
 | SQLite | `/tmp/sftp-manager/sftp-manager.db` |
-| Mock SFTP | `/tmp/sftp-manager/mock-sftp` |
+| Mock SFTP | Private Vercel Blob under `BLOB_SFTP_PREFIX` |
 | Application log | `/tmp/sftp-manager/logs/application.log` |
 
-In this demonstration mode, a stale SQLite `DATABASE_URL`, `MOCK_SFTP_ROOT`,
+In this fallback database mode, a stale SQLite `DATABASE_URL`, `MOCK_SFTP_ROOT`,
 `APP_LOG_DIR`, and `SEED_DEMO_USERS` are ignored so container-oriented settings
 cannot direct writes into Vercel's read-only application image or require
 Docker secret files. A PostgreSQL `DATABASE_URL` is never ignored. The
 documented demo users are always seeded in fallback mode. Explicit paths and
 seed choices supplied directly by framework-native tests remain supported.
+Demo startup still requires `BLOB_READ_WRITE_TOKEN`; it never falls back to
+instance-local mock files.
 
 This mode seeds the documented demo users and enables secure cookies by
-default. The paths are local to one stateless service instance and can disappear
-on scale-down, replacement, or deployment; concurrent instances do not share
-them. Production SFTP credentials and production data must never be entered in
-this mode. Use PostgreSQL mode or Compose for durable application state.
+default. The SQLite and log paths are local to one stateless service instance
+and can disappear on scale-down, replacement, or deployment; the Blob-backed
+MOCK files remain shared and durable. Production SFTP credentials and
+production data must never be entered in this mode. Use PostgreSQL plus Blob,
+or Compose, for fully durable application state.
 
 ### Public demo mode
 
@@ -85,6 +92,19 @@ shows those credentials while leaving both input fields empty. Existing seeded
 `@gmail.com` identities are renamed in place so their UUID-based grants, tasks,
 sessions, and audit relationships remain attached. Demo mode can use PostgreSQL
 when the demonstration needs durable accounts and sessions.
+
+Create a private Blob store from the Vercel project Storage tab before the
+deployment starts. To deliberately return a connected demo to its seed state,
+pull its Production variables into a protected local environment and run:
+
+```bash
+cd backend
+python -m scripts.reset_demo_state --confirm RESET-SFTP-MANAGER-DEMO
+```
+
+The guard requires demo mode, PostgreSQL, Blob credentials, and the exact
+confirmation phrase. It recreates only the application's tables and clears
+only the configured Blob prefix; the Neon database and Blob store remain.
 
 ## Operational logging
 

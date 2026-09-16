@@ -19,6 +19,7 @@ import asyncssh
 
 from ..models import SftpServer
 from ..security import decrypt_credential
+from .blob_storage import VercelBlobMockStorage
 
 
 def canonical_path(path: str) -> str:
@@ -56,9 +57,29 @@ class _PinnedHostKeyClient(asyncssh.SSHClient):
 class SftpGateway:
     """Execute bounded SFTP operations without exposing credentials upstream."""
 
-    def __init__(self, mock_root: Path):
+    def __init__(
+        self,
+        mock_root: Path,
+        *,
+        blob_token: str | None = None,
+        blob_prefix: str = "sftp-manager-demo",
+        blob_client: Any | None = None,
+    ):
         self.mock_root = mock_root.resolve()
         self.mock_root.mkdir(parents=True, exist_ok=True)
+        self.blob_storage = (
+            VercelBlobMockStorage(blob_token, blob_prefix, client=blob_client)
+            if blob_token
+            else None
+        )
+
+    @property
+    def mock_storage_type(self) -> str:
+        return "vercel-blob" if self.blob_storage else "filesystem"
+
+    async def close(self) -> None:
+        if self.blob_storage:
+            await self.blob_storage.close()
 
     def _mock_path(self, path: str) -> Path:
         path = canonical_path(path)
@@ -125,6 +146,8 @@ class SftpGateway:
     async def list(self, server: SftpServer, path: str) -> list[dict[str, Any]]:
         path = canonical_path(path)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                return await self.blob_storage.list(path)
             target = self._mock_path(path)
             if not target.is_dir():
                 raise FileNotFoundError(path)
@@ -175,6 +198,9 @@ class SftpGateway:
         target_path = canonical_path(posixpath.join(canonical_path(folder), valid_name(filename)))
         temporary_path = self._upload_temp_path(target_path, upload_id)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                await self.blob_storage.begin_upload(target_path, upload_id, replace=replace)
+                return target_path
             target = self._mock_path(target_path)
             temporary = self._mock_path(temporary_path)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -210,6 +236,8 @@ class SftpGateway:
         """Return the byte count confirmed by the remote SFTP server."""
         temporary_path = self._upload_temp_path(target_path, upload_id)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                return await self.blob_storage.upload_size(upload_id)
             temporary = self._mock_path(temporary_path)
             if not temporary.is_file():
                 raise FileNotFoundError(temporary_path)
@@ -235,6 +263,8 @@ class SftpGateway:
         """Write one request body to SFTP and return only after remote size verification."""
         temporary_path = self._upload_temp_path(target_path, upload_id)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                return await self.blob_storage.write_upload_chunk(upload_id, offset, chunks)
             temporary = self._mock_path(temporary_path)
             if not temporary.is_file():
                 raise FileNotFoundError(temporary_path)
@@ -282,6 +312,13 @@ class SftpGateway:
         if await self.upload_size(server, target_path, upload_id) != expected_size:
             raise ValueError("remote upload size does not match the expected file size")
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                return await self.blob_storage.complete_upload(
+                    target_path,
+                    upload_id,
+                    expected_size,
+                    replace=replace,
+                )
             if self._mock_path(target_path).exists() and not replace:
                 raise FileExistsError(target_path)
             os.replace(self._mock_path(temporary_path), self._mock_path(target_path))
@@ -309,6 +346,9 @@ class SftpGateway:
         """Best-effort removal of a resumable upload's temporary remote object."""
         temporary_path = self._upload_temp_path(target_path, upload_id)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                await self.blob_storage.abort_upload(upload_id)
+                return
             self._mock_path(temporary_path).unlink(missing_ok=True)
             return
         connection = await self._connect(server)
@@ -325,6 +365,10 @@ class SftpGateway:
     async def download(self, server: SftpServer, path: str) -> AsyncIterator[bytes]:
         path = canonical_path(path)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                async for chunk in self.blob_storage.download(path):
+                    yield chunk
+                return
             target = self._mock_path(path)
             if not target.is_file():
                 raise FileNotFoundError(path)
@@ -347,6 +391,9 @@ class SftpGateway:
     async def create_folder(self, server: SftpServer, parent: str, name: str) -> str:
         path = canonical_path(posixpath.join(canonical_path(parent), valid_name(name)))
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                await self.blob_storage.create_folder(path)
+                return path
             self._mock_path(path).mkdir()
             return path
         connection = await self._connect(server)
@@ -366,6 +413,9 @@ class SftpGateway:
     async def move(self, server: SftpServer, source: str, destination: str) -> str:
         source, destination = canonical_path(source), canonical_path(destination)
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                await self.blob_storage.move(source, destination)
+                return destination
             source_path, destination_path = self._mock_path(source), self._mock_path(destination)
             if destination_path.exists():
                 raise FileExistsError(destination)
@@ -389,6 +439,9 @@ class SftpGateway:
         if path == "/":
             raise ValueError("cannot delete root")
         if server.adapter_type == "MOCK":
+            if self.blob_storage:
+                await self.blob_storage.delete(path)
+                return
             target = self._mock_path(path)
             if target.is_dir():
                 target.rmdir()
@@ -409,11 +462,14 @@ class SftpGateway:
             await connection.wait_closed()
 
 
-def seed_mock_files(root: Path) -> None:
-    (root / "finance" / "month-end").mkdir(parents=True, exist_ok=True)
-    (root / "shared").mkdir(parents=True, exist_ok=True)
-    welcome = root / "shared" / "welcome.txt"
-    template = root / "finance" / "month-end" / "upload-template.csv"
+async def seed_mock_files(gateway: SftpGateway) -> None:
+    if gateway.blob_storage:
+        await gateway.blob_storage.seed()
+        return
+    (gateway.mock_root / "finance" / "month-end").mkdir(parents=True, exist_ok=True)
+    (gateway.mock_root / "shared").mkdir(parents=True, exist_ok=True)
+    welcome = gateway.mock_root / "shared" / "welcome.txt"
+    template = gateway.mock_root / "finance" / "month-end" / "upload-template.csv"
     if not welcome.exists():
         welcome.write_text("Welcome to the SFTP Management Portal mock server.\n", encoding="utf-8")
     if not template.exists():

@@ -7,7 +7,7 @@
 | Product scope | Single-organization production deployment |
 | Frontend | Node.js 24, Next.js, React, TypeScript, Material UI |
 | Backend | Python 3.12, FastAPI, Pydantic, SQLAlchemy, AsyncSSH, APScheduler |
-| Persistence | Durable SQLite for Compose; durable PostgreSQL for Vercel |
+| Persistence | Durable SQLite for Compose; durable PostgreSQL plus private Blob for the Vercel demo |
 
 This file is the specification index. Requirements are owned by domain so
 multiple contributors can work without editing one monolithic document. Each

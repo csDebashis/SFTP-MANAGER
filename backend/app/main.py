@@ -734,7 +734,7 @@ async def seed_demo_data(app: FastAPI) -> None:
         )
         if existing_server:
             await db.commit()
-            seed_mock_files(app.state.gateway.mock_root)
+            await seed_mock_files(app.state.gateway)
             return
 
         server = SftpServer(
@@ -776,7 +776,7 @@ async def seed_demo_data(app: FastAPI) -> None:
             )
         )
         await db.commit()
-    seed_mock_files(app.state.gateway.mock_root)
+    await seed_mock_files(app.state.gateway)
 
 
 async def bootstrap_admin(app: FastAPI) -> None:
@@ -1058,6 +1058,12 @@ def create_app(
                 else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
             )
         )
+    blob_token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
+    if vercel_runtime and seed_demo and not blob_token:
+        raise RuntimeError(
+            "Vercel demo mode requires BLOB_READ_WRITE_TOKEN so mock SFTP files are durable"
+        )
+    blob_prefix = os.getenv("BLOB_SFTP_PREFIX", "sftp-manager-demo")
     logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager
@@ -1089,24 +1095,30 @@ def create_app(
         yield
         logger.info("Application shutdown beginning", extra={"event": "application.shutdown.begin"})
         scheduler.shutdown(wait=False)
+        await app.state.gateway.close()
         await app.state.database.close()
         logger.info("Application shutdown complete", extra={"event": "application.shutdown.complete"})
 
     app = FastAPI(title="SFTP Manager API", version="0.1.0", lifespan=lifespan)
     app.state.database = Database(database_url)
-    app.state.gateway = SftpGateway(mock_root_path)
+    app.state.gateway = SftpGateway(
+        mock_root_path,
+        blob_token=blob_token or None,
+        blob_prefix=blob_prefix,
+    )
     app.state.logger = logger
     app.state.seed_demo = seed_demo
     app.state.deployment_mode = "demo" if seed_demo else "production"
     app.state.vercel_demo = vercel_runtime and not vercel_durable_database
     app.state.durable_database = app.state.database.dialect == "postgresql"
+    app.state.durable_mock_files = app.state.gateway.mock_storage_type == "vercel-blob"
     app.state.upload_locks = {}
     app.state.upload_target_locks = {}
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
         messages = [readable_validation_error(error) for error in exc.errors()]
-        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": "; ".join(messages)})
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": "; ".join(messages)})
 
     origins = [value.strip() for value in os.getenv("TRUSTED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])

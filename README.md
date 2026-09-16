@@ -48,19 +48,24 @@ requests routed to Next.js. In the import screen, use the **Services** framework
 preset if Vercel does not select it automatically.
 
 For durable Vercel state, add a PostgreSQL database from the Vercel Marketplace
-(Neon is supported on the free plans) and connect it to this project. The
-integration supplies `DATABASE_URL`; the backend automatically selects asyncpg,
-requires TLS when the provider URL requests it, and stores users, sessions,
-tasks, server configuration, transfer metadata, idempotency records, and audit
-events in PostgreSQL. Set these Production environment variables in Vercel:
+(Neon is supported on the free plans) and connect it to this project. Also open
+the project's **Storage** tab and create a **private Vercel Blob** store named
+`sftp-manager-demo-files`. Connecting the store adds `BLOB_READ_WRITE_TOKEN`
+to the project automatically. The database integration supplies `DATABASE_URL`;
+the backend stores users, sessions, tasks, server configuration, transfer
+metadata, idempotency records, and audit events in PostgreSQL. Private Blob
+stores the demo MOCK server's folders and file contents. Set these Production
+environment variables in Vercel:
 
 | Variable | Value |
 |---|---|
 | `APP_ENV` | `production` |
-| `DEPLOYMENT_MODE` | `production` |
+| `DEPLOYMENT_MODE` | `demo` for the public demo, or `production` for a private production install |
 | `BOOTSTRAP_ADMIN_EMAIL` | Initial administrator email |
 | `BOOTSTRAP_ADMIN_PASSWORD` | A secret password of at least 12 characters |
 | `APP_CREDENTIAL_ENCRYPTION_KEY` | 32 random bytes or their URL-safe base64 encoding |
+| `BLOB_SFTP_PREFIX` | Optional; defaults to `sftp-manager-demo` |
+| `MAX_UPLOAD_BYTES` | `10485760` is recommended for the shared public demo |
 
 Vercel cannot mount the Docker secret files used by Compose. Add the two secret
 values through the Vercel environment-variable UI, scope them to Production,
@@ -69,14 +74,23 @@ environment variable. The bootstrap password is used only when no active Admin
 exists, but it should remain protected and be rotated after first login.
 
 For a public demo such as `sftp-manager.csdebashis.com`, set
-`DEPLOYMENT_MODE=demo`. The same mode works with PostgreSQL for durable demo
-accounts and sessions. Without a PostgreSQL `DATABASE_URL`, the import remains
-a deliberately disposable demo and stores SQLite, mock SFTP files, and
-filesystem logs under the function instance's writable `/tmp` directory. That
-state can reset at any time and must not receive production credentials or
-data. Vercel rejects `DEPLOYMENT_MODE=production` without PostgreSQL. Even in
-durable PostgreSQL mode, mock SFTP files and the local filesystem log are
-disposable; real file contents remain on the remote SFTP server.
+`DEPLOYMENT_MODE=demo`. Vercel demo startup requires the connected private Blob
+store, and PostgreSQL is required for durable accounts and sessions. The demo
+MOCK server stores resumable upload chunks and completed files under its
+isolated Blob prefix, so instance replacement and redeployment do not remove
+them. Without PostgreSQL the database remains disposable under `/tmp`; Vercel
+rejects `DEPLOYMENT_MODE=production` without PostgreSQL. Real SFTP file contents
+always remain on their configured remote SFTP server.
+
+To deliberately reset a connected demo after pulling its Production variables
+into the shell, run the guarded utility below. It drops and recreates only this
+application's PostgreSQL tables and clears only `BLOB_SFTP_PREFIX`; it does not
+delete the Neon database or Blob store.
+
+```bash
+cd backend
+python -m scripts.reset_demo_state --confirm RESET-SFTP-MANAGER-DEMO
+```
 
 Database audit events are durable with PostgreSQL. Runtime logs are emitted to
 Vercel stdout, but Vercel Hobby retains them only for its platform retention
