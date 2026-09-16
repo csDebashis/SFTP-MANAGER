@@ -20,7 +20,12 @@ All IDs are server-generated UUIDv4 values. A user's ID is assigned during signu
 | `TaskInstance` | `id`, `definitionId`, `occurrenceKey`, `scheduledAt`, `dueAt`, exactly one of `assigneeUserId`/`assigneeGroupId`, definition display/routing snapshot, `status`, `fileCheckIntervalMinutes`, `lastCheckedAt`, `nextCheckAt`, `createdAt` |
 | `AuditEvent` | Fields defined in section 5.8 |
 
-Repository contracts must exist for every entity category and expose only domain operations, not storage-specific queries. Services depend on repository protocols/interfaces through dependency injection. SQLAlchemy repositories use explicit SQLite transactions so changes to multiple related records either commit fully or roll back fully. The current SQLAlchemy metadata is the authoritative schema baseline; no migration framework is used.
+Repository contracts must exist for every entity category and expose only domain
+operations, not storage-specific queries. Services depend on repository
+protocols/interfaces through dependency injection. SQLAlchemy repositories use
+explicit transactions so changes to multiple related records either commit
+fully or roll back fully. The current SQLAlchemy metadata is the authoritative
+schema baseline for both SQLite and PostgreSQL; no migration framework is used.
 
 ## 7. System architecture
 
@@ -45,7 +50,7 @@ Repositories   APScheduler        SFTP gateway
   │               │                  │
   └───────┬───────┘                  ▼
           ▼                    AsyncSSH connection pools
-SQLite + SQLAlchemy                  │
+SQLite/PostgreSQL + SQLAlchemy       │
 durable application data             ▼
                               Remote SFTP servers
 ```
@@ -55,7 +60,9 @@ durable application data             ▼
 - **Node.js/Next.js frontend:** an independently deployed React service providing presentation, routing, forms, accessible interactions, task context, and streaming upload/download initiation. It proxies same-origin API requests but never computes authoritative access.
 - **FastAPI routes:** protocol handling, schema validation, session/CSRF enforcement, status codes, ETags, idempotency headers, and response shaping.
 - **Application services:** transactions, authorization decisions, canonical-path policy, task rules, secret redaction, and audit emission.
-- **Repositories:** replaceable persistence contracts implemented with SQLAlchemy and SQLite transactions in v1.
+- **Repositories:** replaceable persistence contracts implemented with
+  SQLAlchemy, using SQLite for Compose and PostgreSQL for durable Vercel
+  deployments.
 - **SFTP gateway:** connection establishment, host-key verification, remote path handling, bounded pooling, streaming, timeout mapping, and safe cleanup.
 - **Scheduler:** generation of task instances and overdue transitions. A single elected scheduler process uses database uniqueness constraints to prevent duplicate occurrences.
 - **Observability:** structured operational logs, metrics, traces/correlation IDs, and health state. Operational logs are separate from audit events.
@@ -211,5 +218,10 @@ Rules:
 - Mutable-resource reads return an `ETag` derived from the record version.
 - Admin updates require `If-Match`; missing headers return 428 and stale versions return 412.
 - File mutations, signup approval, credential rotation, and task actions require `Idempotency-Key` UUID headers.
-- Idempotency results are stored in SQLite for 24 hours and scoped to user, method, and normalized target. Reusing a key with a different payload returns 409.
-- Concurrent writes use short SQLite transactions with a configurable busy timeout. Write transactions use `BEGIN IMMEDIATE` where serialization is required, and long SFTP network operations must not hold a database transaction open.
+- Idempotency results are stored in the configured durable database for 24
+  hours and scoped to user, method, and normalized target. Reusing a key with a
+  different payload returns 409.
+- Concurrent writes use short database transactions. SQLite applies a
+  configurable busy timeout and `BEGIN IMMEDIATE` where serialization is
+  required; PostgreSQL relies on transactional constraints. Long SFTP network
+  operations must not hold a database transaction open.

@@ -21,7 +21,7 @@ def _login(client: TestClient, email: str, password: str) -> dict[str, str]:
 
 def _assignee_id(client: TestClient) -> str:
     users = client.get("/api/v1/users").json()["items"]
-    return next(user["id"] for user in users if user["email"] == "user@gmail.com")
+    return next(user["id"] for user in users if user["email"] == "user@example.com")
 
 
 def _server_id(client: TestClient) -> str:
@@ -201,7 +201,7 @@ def test_future_assignment_becomes_visible_only_at_its_schedule(
     )
     assert created.status_code == 201, created.text
 
-    _login(client, "user@gmail.com", "User123!Secure")
+    _login(client, "user@example.com", "User123!Secure")
     visible = client.get("/api/v1/tasks")
     assert visible.status_code == 200, visible.text
     assert all(item["definitionId"] != created.json()["id"] for item in visible.json()["items"])
@@ -229,7 +229,7 @@ def test_user_tasks_sort_overdue_then_recent_pending(
         )
         assert response.status_code == 201, response.text
 
-    _login(client, "user@gmail.com", "User123!Secure")
+    _login(client, "user@example.com", "User123!Secure")
     titles = [item["title"] for item in client.get("/api/v1/tasks").json()["items"]]
     selected = [title for title in titles if title in {"Expired delivery", "Older pending delivery", "Recent pending delivery"}]
     assert selected == ["Expired delivery", "Recent pending delivery", "Older pending delivery"]
@@ -276,7 +276,7 @@ def test_group_task_is_shared_and_tracks_current_membership(
     )
     assert signup.status_code == 201
     users = client.get("/api/v1/users").json()["items"]
-    first_user = next(user for user in users if user["email"] == "user@gmail.com")
+    first_user = next(user for user in users if user["email"] == "user@example.com")
     second_user = next(user for user in users if user["email"] == "second@gmail.com")
     assert client.post(
         f"/api/v1/users/{second_user['id']}/approve",
@@ -303,7 +303,7 @@ def test_group_task_is_shared_and_tracks_current_membership(
     )
     assert definition_response.status_code == 201, definition_response.text
 
-    first_headers = _login(client, "user@gmail.com", "User123!Secure")
+    first_headers = _login(client, "user@example.com", "User123!Secure")
     first_task = next(task for task in client.get("/api/v1/tasks").json()["items"] if task["definitionId"] == definition_response.json()["id"])
     assert first_task["assigneeType"] == "GROUP"
     assert client.post(f"/api/v1/tasks/{first_task['id']}/start", headers=first_headers).status_code == 200
@@ -312,26 +312,26 @@ def test_group_task_is_shared_and_tracks_current_membership(
     second_task = next(task for task in client.get("/api/v1/tasks").json()["items"] if task["id"] == first_task["id"])
     assert second_task["status"] == "IN_PROGRESS"
 
-    admin_headers = _login(client, "admin@gmail.com", "Admin123!Secure")
+    admin_headers = _login(client, "admin@example.com", "Admin123!Secure")
     assert client.patch(
         f"/api/v1/groups/{group['id']}",
         json={"name": group["name"], "description": group["description"], "memberIds": [second_user["id"]]},
         headers=admin_headers,
     ).status_code == 200
-    _login(client, "user@gmail.com", "User123!Secure")
+    _login(client, "user@example.com", "User123!Secure")
     assert all(task["id"] != first_task["id"] for task in client.get("/api/v1/tasks").json()["items"])
 
-    admin_headers = _login(client, "admin@gmail.com", "Admin123!Secure")
+    admin_headers = _login(client, "admin@example.com", "Admin123!Secure")
     assert client.patch(
         f"/api/v1/groups/{group['id']}",
         json={"name": group["name"], "description": group["description"], "memberIds": [first_user["id"], second_user["id"]]},
         headers=admin_headers,
     ).status_code == 200
-    _login(client, "user@gmail.com", "User123!Secure")
+    _login(client, "user@example.com", "User123!Secure")
     restored = next(task for task in client.get("/api/v1/tasks").json()["items"] if task["id"] == first_task["id"])
     assert restored["status"] == "IN_PROGRESS"
 
-    admin_headers = _login(client, "admin@gmail.com", "Admin123!Secure")
+    admin_headers = _login(client, "admin@example.com", "Admin123!Secure")
     assert client.delete(f"/api/v1/groups/{group['id']}", headers=admin_headers).status_code == 204
     assert all(task["id"] != first_task["id"] for task in client.get("/api/v1/tasks").json()["items"])
     assert all(item["id"] != definition_response.json()["id"] for item in client.get("/api/v1/task-definitions").json()["items"])
@@ -352,7 +352,7 @@ def test_matching_file_task_rejects_manual_completion_but_allows_dismissal(
         headers=admin_headers,
     )
     task = next(task for task in client.get("/api/v1/tasks").json()["items"] if task["definitionId"] == created.json()["id"])
-    user_headers = _login(client, "user@gmail.com", "User123!Secure")
+    user_headers = _login(client, "user@example.com", "User123!Secure")
     completed = client.post(f"/api/v1/tasks/{task['id']}/complete", headers=user_headers)
     assert completed.status_code == 409
     assert "required file" in str(completed.json())
@@ -423,14 +423,14 @@ def test_matching_check_interval_and_manual_refresh(
         client.app,
     ) == 0
 
-    user_headers = _login(client, "user@gmail.com", "User123!Secure")
+    user_headers = _login(client, "user@example.com", "User123!Secure")
     refreshed = client.post(f"/api/v1/tasks/{task['id']}/check", headers=user_headers)
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["matched"] is True
     assert refreshed.json()["task"]["status"] == "COMPLETED"
     assert refreshed.json()["task"]["lastCheckedAt"] is not None
 
-    _login(client, "admin@gmail.com", "Admin123!Secure")
+    _login(client, "admin@example.com", "Admin123!Secure")
     definition = next(
         item for item in client.get("/api/v1/task-definitions").json()["items"]
         if item["id"] == definition_id

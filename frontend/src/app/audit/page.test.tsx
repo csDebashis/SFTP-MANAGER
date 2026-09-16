@@ -17,7 +17,7 @@ const uploadEvent = {
   timestamp: "2026-09-11T12:00:00Z",
   requestId: "request-123",
   actorId: "user-id",
-  actorDisplay: "user@gmail.com",
+  actorDisplay: "user@example.com",
   action: "FILE_UPLOAD",
   resourceType: "file",
   resourceId: null,
@@ -41,7 +41,7 @@ describe("Audit activity details", () => {
     apiMock.mockResolvedValue({ items: [uploadEvent] });
     render(<AuditPage />);
 
-    expect(await screen.findByText("user@gmail.com")).toBeInTheDocument();
+    expect(await screen.findByText("user@example.com")).toBeInTheDocument();
     expect(screen.getByText("File: report.csv")).toBeInTheDocument();
     expect(screen.getByText("Finance SFTP")).toBeInTheDocument();
     expect(screen.getByText("/incoming")).toBeInTheDocument();
@@ -59,7 +59,7 @@ describe("Audit activity details", () => {
     apiMock.mockResolvedValue({ items: [userEvent] });
     render(<AuditPage />);
 
-    await screen.findByText("user@gmail.com");
+    await screen.findByText("user@example.com");
     fireEvent.mouseOver(screen.getByRole("button", { name: "Request details for FILE UPLOAD" }));
     expect(await screen.findByText(/request-123/)).toBeInTheDocument();
     expect(screen.queryByText(/203\.0\.113\.42/)).not.toBeInTheDocument();

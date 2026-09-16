@@ -25,9 +25,9 @@ def login(client: TestClient, email: str, password: str) -> dict[str, str]:
 
 @pytest.fixture()
 def admin_headers(client: TestClient) -> dict[str, str]:
-    return login(client, "admin@gmail.com", "Admin123!Secure")
+    return login(client, "admin@example.com", "Admin123!Secure")
 
 
 @pytest.fixture()
 def user_headers(client: TestClient) -> dict[str, str]:
-    return login(client, "user@gmail.com", "User123!Secure")
+    return login(client, "user@example.com", "User123!Secure")

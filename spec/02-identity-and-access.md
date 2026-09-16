@@ -73,15 +73,26 @@ Authorization rules:
 - Signup assigns an immutable server-generated UUIDv4 user ID. Every session, group membership, direct-user grant, task assignment, upload session, audit relationship, and subsequent user operation references that ID; an email address or display name is never used as a relational identity.
 - Admin dashboards show pending signup requests. An Admin may approve, reject, or leave a request pending.
 - Approval requires selection of a role and may include group membership and folder grants. Approval activates the account, invalidates any stale sessions, and sends an email when SMTP is configured.
-- The first Admin is created at startup from `BOOTSTRAP_ADMIN_EMAIL` and a password read from `BOOTSTRAP_ADMIN_PASSWORD_FILE`. The password is hashed immediately and never logged.
+- The first Admin is created at startup from `BOOTSTRAP_ADMIN_EMAIL` and a
+  password read from `BOOTSTRAP_ADMIN_PASSWORD_FILE` in a container runtime or
+  `BOOTSTRAP_ADMIN_PASSWORD` in a serverless runtime. The password is hashed
+  immediately and never logged.
 
 #### Login and sessions
 
 - Login accepts email and password and returns the same generic failure response for unknown users, incorrect passwords, rejected accounts, and suspended accounts.
+- Login email and password inputs are empty on every initial render and never
+  contain seeded credentials as default form values.
+- In `demo` deployment mode, the login footer publishes the usable
+  `admin@example.com` / `Admin123!Secure` Admin account and
+  `user@example.com` / `User123!Secure` User account. In `production`
+  deployment mode, the footer and all other public UI omit those credentials.
 - Pending users are authenticated only far enough to reach the pending-approval page.
 - Passwords are hashed with Argon2id using current OWASP-recommended parameters.
 - The browser receives an opaque, cryptographically random session identifier in a `Secure`, `HttpOnly`, `SameSite=Lax` cookie.
-- Session records are stored in SQLite and contain only a hash of the identifier, user ID, issued time, last-used time, expiry, CSRF secret, and client metadata.
+- Session records are stored in the configured durable database and contain
+  only a hash of the identifier, user ID, issued time, last-used time, expiry,
+  CSRF secret, and client metadata.
 - Default session lifetime is 8 hours with a 30-minute idle timeout. Both values are configurable.
 - Session IDs rotate after login, password change, role change, and privilege change.
 - Logout revokes the current session. Password reset, suspension, rejection, or role downgrade revokes all sessions for the user.

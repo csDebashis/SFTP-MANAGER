@@ -11,7 +11,7 @@ vi.mock("@/components/AppShell", () => ({ default: ({ children }: { children: Re
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 afterEach(cleanup);
 
-const admin = { id: "admin-id", email: "admin@gmail.com", displayName: "Administrator", role: "ADMIN", state: "ACTIVE", timezone: "UTC", version: 1 };
+const admin = { id: "admin-id", email: "admin@example.com", displayName: "Administrator", role: "ADMIN", state: "ACTIVE", timezone: "UTC", version: 1 };
 const user = { ...admin, id: "user-id", email: "test@gmail.com", displayName: "Test User", role: "USER" };
 const group = { id: "group-id", name: "Settlement team", description: "Shared work", memberIds: [user.id], version: 1 };
 const server = { id: "server-id", name: "Finance SFTP", description: "", host: "mock.local", port: 22, username: "mock", authType: "PASSWORD", rootPath: "/", hostKeyFingerprint: "mock-local", adapterType: "MOCK", enabled: true, credentialConfigured: true, version: 1 };

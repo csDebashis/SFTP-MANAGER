@@ -3,11 +3,11 @@
 | Field | Value |
 |---|---|
 | Status | Implementation-ready modular specification |
-| Version | 1.2 |
+| Version | 1.3 |
 | Product scope | Single-organization production deployment |
 | Frontend | Node.js 24, Next.js, React, TypeScript, Material UI |
 | Backend | Python 3.12, FastAPI, Pydantic, SQLAlchemy, AsyncSSH, APScheduler |
-| Persistence | Durable SQLite database |
+| Persistence | Durable SQLite for Compose; durable PostgreSQL plus private Blob for the Vercel demo |
 
 This file is the specification index. Requirements are owned by domain so
 multiple contributors can work without editing one monolithic document. Each
@@ -25,7 +25,7 @@ change must update the smallest applicable module and its acceptance coverage.
 | [Audit](spec/06-audit.md) | Event coverage, visibility, privacy, exports |
 | [Data, architecture, and API](spec/07-data-architecture-and-api.md) | Models, components, endpoints, errors, concurrency |
 | [Security and accessibility](spec/08-security-and-accessibility.md) | Security controls, privacy, WCAG, visual behavior |
-| [Operations and persistence](spec/09-operations-and-persistence.md) | Logging, health, deployment, SQLite, scaling |
+| [Operations and persistence](spec/09-operations-and-persistence.md) | Logging, health, deployment, SQLite/PostgreSQL, scaling |
 | [Quality and acceptance](spec/10-quality-and-acceptance.md) | Tests, release gates, traceability |
 
 ## Change policy
@@ -33,12 +33,13 @@ change must update the smallest applicable module and its acceptance coverage.
 - The explicit user-approved behavior and the relevant module form the product
   contract. Resolve contradictions in the module before implementation.
 - Behavior changes require pytest and/or Vitest coverage in the same change.
-- Version 1.2 is the SQLite schema baseline. A new deployment starts with an
-  empty `db` directory and creates the complete schema directly from the
-  SQLAlchemy metadata. Alembic and incremental database migrations are not part
-  of this release. An existing database must carry the current baseline marker
-  and match its table/column shape; incompatible data is rejected and may be
-  discarded by stopping the stack and clearing the `db` directory.
+- Version 1.2 is the SQLAlchemy schema baseline shared by SQLite and PostgreSQL.
+  A new empty database creates the complete schema directly from SQLAlchemy
+  metadata. Alembic and incremental database migrations are not part of this
+  release. An existing database must carry the current baseline marker and
+  match its table/column shape; incompatible data is rejected. For disposable
+  Compose data, operators may stop the stack and clear the `db` directory;
+  durable PostgreSQL data must instead be backed up and deliberately replaced.
 - A failing test must be diagnosed and fixed. If it expresses valid behavior
   that conflicts with another valid interpretation and the specification does
   not decide the issue, ask the product owner to confirm the contract before

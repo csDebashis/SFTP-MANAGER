@@ -31,7 +31,7 @@ from sqlalchemy import and_, case, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db import Database
+from .db import Database, is_postgresql_url
 from .logging_config import configure_logging
 from .models import AuditEvent, FileUpload, FolderGrant, Group, GroupMember, LoginAttempt, Session, SftpServer, Task, TaskDefinition, User, utc_now
 from .security import create_session_tokens, encrypt_credential, hash_password, token_hash, verify_password
@@ -42,11 +42,31 @@ ALL_PERMISSIONS = {"LIST", "DOWNLOAD", "UPLOAD", "CREATE_FOLDER", "RENAME", "MOV
 WRITE_PERMISSIONS = {"UPLOAD", "CREATE_FOLDER", "RENAME", "MOVE", "DELETE", "MANAGE_TASKS"}
 ROLES = {"ADMIN", "MANAGER", "USER", "AUDITOR"}
 USER_STATES = {"PENDING_APPROVAL", "ACTIVE", "SUSPENDED", "REJECTED"}
+DEMO_ADMIN_EMAIL = "admin@example.com"
+DEMO_ADMIN_PASSWORD = "Admin123!Secure"
+DEMO_USER_EMAIL = "user@example.com"
+DEMO_USER_PASSWORD = "User123!Secure"
+LEGACY_DEMO_ADMIN_EMAIL = "admin@gmail.com"
+LEGACY_DEMO_USER_EMAIL = "user@gmail.com"
 VALIDATION_FIELD_LABELS = {
     "path": "Folder path",
     "rootPath": "Remote root",
     "targetPath": "Target path",
 }
+
+
+def _is_vercel_runtime() -> bool:
+    """Detect Vercel even when system environment variables are not exposed."""
+
+    if os.getenv("VERCEL", "").strip().lower() in {"1", "true"}:
+        return True
+    current_directory = Path.cwd().resolve()
+    vercel_task_root = Path("/var/task")
+    return (
+        current_directory == vercel_task_root
+        or vercel_task_root in current_directory.parents
+        or not os.access(current_directory, os.W_OK)
+    )
 
 
 def as_utc(value: datetime) -> datetime:
@@ -669,25 +689,54 @@ async def seed_demo_data(app: FastAPI) -> None:
     if not app.state.seed_demo:
         return
     async with app.state.database.sessions() as db:
-        existing = await db.scalar(select(User.id).where(User.email == "admin@gmail.com"))
-        if existing:
-            return
-        admin = User(
-            email="admin@gmail.com",
-            display_name="Mock Administrator",
-            password_hash=hash_password(os.getenv("MOCK_ADMIN_PASSWORD", "Admin123!Secure")),
-            role="ADMIN",
-            state="ACTIVE",
-        )
-        mock_user = User(
-            email="user@gmail.com",
-            display_name="Mock User",
-            password_hash=hash_password(os.getenv("MOCK_USER_PASSWORD", "User123!Secure")),
-            role="USER",
-            state="ACTIVE",
-        )
-        db.add_all([admin, mock_user])
+        admin = await db.scalar(select(User).where(User.email == DEMO_ADMIN_EMAIL))
+        if admin is None:
+            admin = await db.scalar(select(User).where(User.email == LEGACY_DEMO_ADMIN_EMAIL))
+        if admin is None:
+            admin = User(
+                email=DEMO_ADMIN_EMAIL,
+                display_name="Mock Administrator",
+                password_hash="",
+                role="ADMIN",
+                state="ACTIVE",
+            )
+            db.add(admin)
+        admin.email = DEMO_ADMIN_EMAIL
+        admin.display_name = "Mock Administrator"
+        admin.password_hash = hash_password(DEMO_ADMIN_PASSWORD)
+        admin.role = "ADMIN"
+        admin.state = "ACTIVE"
+
+        mock_user = await db.scalar(select(User).where(User.email == DEMO_USER_EMAIL))
+        if mock_user is None:
+            mock_user = await db.scalar(select(User).where(User.email == LEGACY_DEMO_USER_EMAIL))
+        if mock_user is None:
+            mock_user = User(
+                email=DEMO_USER_EMAIL,
+                display_name="Mock User",
+                password_hash="",
+                role="USER",
+                state="ACTIVE",
+            )
+            db.add(mock_user)
+        mock_user.email = DEMO_USER_EMAIL
+        mock_user.display_name = "Mock User"
+        mock_user.password_hash = hash_password(DEMO_USER_PASSWORD)
+        mock_user.role = "USER"
+        mock_user.state = "ACTIVE"
+
         await db.flush()
+        existing_server = await db.scalar(
+            select(SftpServer.id).where(
+                SftpServer.name == "Mock SFTP",
+                SftpServer.adapter_type == "MOCK",
+            )
+        )
+        if existing_server:
+            await db.commit()
+            await seed_mock_files(app.state.gateway)
+            return
+
         server = SftpServer(
             name="Mock SFTP",
             description="Local deterministic SFTP workspace for development and validation",
@@ -727,7 +776,7 @@ async def seed_demo_data(app: FastAPI) -> None:
             )
         )
         await db.commit()
-    seed_mock_files(app.state.gateway.mock_root)
+    await seed_mock_files(app.state.gateway)
 
 
 async def bootstrap_admin(app: FastAPI) -> None:
@@ -739,14 +788,21 @@ async def bootstrap_admin(app: FastAPI) -> None:
             return
         email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
         password_file = os.getenv("BOOTSTRAP_ADMIN_PASSWORD_FILE", "").strip()
-        if not email or not password_file:
+        password_value = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "").strip()
+        if not email or not (password_file or password_value):
             if os.getenv("APP_ENV", "development") == "production":
-                raise RuntimeError("BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD_FILE are required for first startup")
+                raise RuntimeError(
+                    "BOOTSTRAP_ADMIN_EMAIL and either BOOTSTRAP_ADMIN_PASSWORD_FILE "
+                    "or BOOTSTRAP_ADMIN_PASSWORD are required for first startup"
+                )
             return
-        password_path = Path(password_file)
-        if not password_path.is_file():
-            raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD_FILE does not exist")
-        password = password_path.read_text(encoding="utf-8").strip()
+        if password_file:
+            password_path = Path(password_file)
+            if not password_path.is_file():
+                raise RuntimeError("BOOTSTRAP_ADMIN_PASSWORD_FILE does not exist")
+            password = password_path.read_text(encoding="utf-8").strip()
+        else:
+            password = password_value
         if len(password) < 12:
             raise RuntimeError("bootstrap administrator password must be at least 12 characters")
         admin = User(email=email, display_name="Administrator", password_hash=hash_password(password), role="ADMIN", state="ACTIVE")
@@ -967,11 +1023,48 @@ def create_app(
 ) -> FastAPI:
     """Build an isolated application instance and its process-local services."""
 
-    database_url = database_url or os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./sftp-manager.db")
-    mock_root_path = Path(mock_root or os.getenv("MOCK_SFTP_ROOT", "./mock-sftp"))
+    vercel_runtime = _is_vercel_runtime()
+    vercel_data_root = Path(os.getenv("VERCEL_TMP_DIR", "/tmp")) / "sftp-manager"
+    configured_database_url = database_url or os.getenv("DATABASE_URL")
+    vercel_durable_database = vercel_runtime and is_postgresql_url(configured_database_url)
+    if vercel_runtime:
+        # A PostgreSQL URL opts into durable serverless persistence. Any SQLite
+        # URL inherited from the Compose deployment remains unsafe on Vercel and
+        # falls back to an explicitly disposable /tmp demo.
+        database_url = (
+            configured_database_url
+            if vercel_durable_database
+            else f"sqlite+aiosqlite:///{vercel_data_root / 'sftp-manager.db'}"
+        )
+        configured_mock_root = mock_root or vercel_data_root / "mock-sftp"
+        resolved_log_directory = log_directory or vercel_data_root / "logs"
+    else:
+        database_url = configured_database_url or "sqlite+aiosqlite:///./sftp-manager.db"
+        configured_mock_root = mock_root or os.getenv("MOCK_SFTP_ROOT") or "./mock-sftp"
+        resolved_log_directory = log_directory or os.getenv("APP_LOG_DIR") or "./logs"
+    mock_root_path = Path(configured_mock_root)
+    deployment_mode = os.getenv("DEPLOYMENT_MODE", "").strip().lower()
+    if deployment_mode not in {"", "demo", "production"}:
+        raise RuntimeError("DEPLOYMENT_MODE must be either 'demo' or 'production'")
+    if deployment_mode == "production" and vercel_runtime and not vercel_durable_database:
+        raise RuntimeError("DEPLOYMENT_MODE=production requires a PostgreSQL DATABASE_URL on Vercel")
     if seed_demo is None:
-        seed_demo = os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
-    logger = configure_logging(log_directory)
+        seed_demo = (
+            deployment_mode == "demo"
+            if deployment_mode
+            else (
+                True
+                if vercel_runtime and not vercel_durable_database
+                else os.getenv("SEED_DEMO_USERS", "true").lower() == "true"
+            )
+        )
+    blob_token = os.getenv("BLOB_READ_WRITE_TOKEN", "").strip()
+    if vercel_runtime and seed_demo and not blob_token:
+        raise RuntimeError(
+            "Vercel demo mode requires BLOB_READ_WRITE_TOKEN so mock SFTP files are durable"
+        )
+    blob_prefix = os.getenv("BLOB_SFTP_PREFIX", "sftp-manager-demo")
+    logger = configure_logging(resolved_log_directory)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1002,21 +1095,30 @@ def create_app(
         yield
         logger.info("Application shutdown beginning", extra={"event": "application.shutdown.begin"})
         scheduler.shutdown(wait=False)
+        await app.state.gateway.close()
         await app.state.database.close()
         logger.info("Application shutdown complete", extra={"event": "application.shutdown.complete"})
 
     app = FastAPI(title="SFTP Manager API", version="0.1.0", lifespan=lifespan)
     app.state.database = Database(database_url)
-    app.state.gateway = SftpGateway(mock_root_path)
+    app.state.gateway = SftpGateway(
+        mock_root_path,
+        blob_token=blob_token or None,
+        blob_prefix=blob_prefix,
+    )
     app.state.logger = logger
     app.state.seed_demo = seed_demo
+    app.state.deployment_mode = "demo" if seed_demo else "production"
+    app.state.vercel_demo = vercel_runtime and not vercel_durable_database
+    app.state.durable_database = app.state.database.dialect == "postgresql"
+    app.state.durable_mock_files = app.state.gateway.mock_storage_type == "vercel-blob"
     app.state.upload_locks = {}
     app.state.upload_target_locks = {}
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
         messages = [readable_validation_error(error) for error in exc.errors()]
-        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": "; ".join(messages)})
+        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": "; ".join(messages)})
 
     origins = [value.strip() for value in os.getenv("TRUSTED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -1224,7 +1326,7 @@ def create_app(
         db.add(Session(id_hash=token_hash(raw_session), user_id=user.id, csrf_hash=token_hash(csrf), expires_at=expires))
         await add_audit(db, request, "LOGIN", "session", actor=user)
         await db.commit()
-        secure_cookie = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+        secure_cookie = os.getenv("COOKIE_SECURE", "true" if vercel_runtime else "false").lower() == "true"
         response.set_cookie("sftp_session", raw_session, httponly=True, secure=secure_cookie, samesite="lax", max_age=28800, path="/")
         response.set_cookie("sftp_csrf", csrf, httponly=False, secure=secure_cookie, samesite="lax", max_age=28800, path="/")
         return {"user": user_json(user), "csrfToken": csrf}

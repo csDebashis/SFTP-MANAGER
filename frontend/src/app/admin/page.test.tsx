@@ -14,7 +14,7 @@ vi.mock("@/components/AppShell", () => ({
 
 const admin = {
   id: "admin-id",
-  email: "admin@gmail.com",
+  email: "admin@example.com",
   displayName: "Mock Administrator",
   role: "ADMIN",
   state: "ACTIVE",
@@ -40,7 +40,7 @@ const server = {
 
 const user = {
   id: "user-id",
-  email: "user@gmail.com",
+  email: "user@example.com",
   displayName: "Mock User",
   role: "USER",
   state: "ACTIVE",
@@ -144,7 +144,7 @@ describe("Administration create dialogs", () => {
     const dialog = await screen.findByRole("dialog", { name: "Create group" });
     const memberSearch = within(dialog).getByRole("combobox", { name: "Members" });
     fireEvent.change(memberSearch, { target: { value: "user@gmail" } });
-    fireEvent.click(await screen.findByRole("option", { name: "Mock User (user@gmail.com)" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Mock User (user@example.com)" }));
     expect(within(dialog).getByText("1 member selected")).toBeInTheDocument();
   });
 });
@@ -211,7 +211,7 @@ describe("Administration edit dialogs", () => {
 
     render(<AdminPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit admin@gmail.com" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit admin@example.com" }));
     expect(await screen.findByRole("dialog", { name: "Edit user" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit user" })).not.toBeInTheDocument());
@@ -244,7 +244,7 @@ describe("Administration edit dialogs", () => {
     });
 
     render(<AdminPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Edit user@gmail.com" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit user@example.com" }));
     const dialog = await screen.findByRole("dialog", { name: "Edit user" });
     expect(within(dialog).getByText("User ID: user-id")).toBeInTheDocument();
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Display name" }), { target: { value: "Renamed User" } });
@@ -316,9 +316,9 @@ describe("Administration group member viewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "View Finance members" }));
     const dialog = await screen.findByRole("dialog", { name: "Finance members" });
     expect(within(dialog).getByText("Mock User")).toBeInTheDocument();
-    expect(within(dialog).getByText("user@gmail.com")).toBeInTheDocument();
+    expect(within(dialog).getByText("user@example.com")).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove user@gmail.com from Finance" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove user@example.com from Finance" }));
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/groups/group-id", expect.objectContaining({ method: "PATCH" })));
     expect(await within(dialog).findByText("This group has no members.")).toBeInTheDocument();
     expect(screen.getByText("Group member removed")).toBeInTheDocument();

@@ -41,3 +41,5 @@ sftp-manager.db*
 deploy/secrets/*
 !deploy/secrets/.gitignore
 !deploy/secrets/README.md
+.vercel
+.env*

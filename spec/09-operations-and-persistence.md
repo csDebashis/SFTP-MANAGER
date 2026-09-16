@@ -13,7 +13,7 @@ Owner: Platform operations. Related modules:
 - Emit metrics for request latency/error rate, active sessions, SFTP connection attempts and latency, transfer counts/bytes/outcomes, scheduler lag, generated/overdue tasks, authorization denials, login failures, database latency/lock contention, and entity counts.
 - Never use operational logs as the audit source of truth.
 - `/health/live` succeeds while the event loop is responsive.
-- `/health/ready` verifies required configuration, SQLite connectivity/current-baseline compatibility, scheduler operation, and credential-key availability. It does not require every remote SFTP server to be online.
+- `/health/ready` verifies required configuration, database connectivity/current-baseline compatibility, scheduler operation, and credential-key availability. It does not require every remote SFTP server to be online.
 
 ### 11.2 Failure behavior
 
@@ -21,7 +21,7 @@ Owner: Platform operations. Related modules:
 - SFTP failures use categorized codes such as `SFTP_AUTH_FAILED`, `SFTP_HOST_KEY_MISMATCH`, `SFTP_TIMEOUT`, `SFTP_PATH_NOT_FOUND`, and `SFTP_UNAVAILABLE`.
 - Metadata operations may retry once only for an idempotent network failure. File mutations do not retry automatically unless protected by their operation-specific idempotency logic.
 - Connection pools are keyed by server configuration version and closed after credential rotation, host-key change, disablement, or shutdown.
-- Graceful shutdown rejects new transfers, allows active transfers up to 30 seconds to finish, performs cleanup, checkpoints SQLite WAL state, and then closes database and SFTP connections.
+- Graceful shutdown rejects new transfers, allows active transfers up to 30 seconds to finish, performs cleanup, checkpoints SQLite WAL state when SQLite is in use, and then closes database and SFTP connections.
 
 ## 12. Configuration and deployment
 
@@ -61,9 +61,62 @@ Deployment must enforce:
 - `scripts/verify-build-deploy.sh --verify-only` performs tests and production image builds without deploying.
 - Deployment requires `BOOTSTRAP_ADMIN_EMAIL` plus the three non-empty files documented in `deploy/secrets/README.md`. The script must stop before deployment if any prerequisite is missing.
 
+### 12.2 Vercel deployment
+
+- Importing the repository root from the `vercel` branch deploys the Next.js
+  frontend and FastAPI backend together through Vercel Services. Ordered public
+  rewrites route `/api/*` to FastAPI before routing all other paths to Next.js.
+- Without a PostgreSQL `DATABASE_URL`, the import-ready configuration may still
+  use `/tmp/sftp-manager` for a disposable SQLite database and filesystem log,
+  but demo MOCK files require private Blob and remain durable. When the backend
+  detects Vercel through its runtime environment, `/var/task` application mount,
+  or a read-only working directory, inherited filesystem-path and demo-seeding
+  settings are ignored so container defaults cannot redirect writes into the
+  read-only application image or require unavailable Docker secret files.
+- A durable Vercel demonstration connects PostgreSQL and a private Vercel Blob
+  store. PostgreSQL owns accounts, sessions, tasks, audit history, and server
+  configuration; Blob owns the demo MOCK server's folders, resumable chunks,
+  and completed files under `BLOB_SFTP_PREFIX`. Vercel demo startup fails when
+  `BLOB_READ_WRITE_TOKEN` is absent rather than silently storing demo files in
+  function-local `/tmp`. A deployment without PostgreSQL still has disposable
+  database state and is not an accepted durable demo configuration.
+- When `DATABASE_URL` selects PostgreSQL, the Vercel backend uses the asyncpg
+  SQLAlchemy driver, provider-enforced TLS, a deliberately small local
+  connection pool, and a PostgreSQL advisory transaction lock for concurrent
+  cold-start schema initialization. Users, sessions, server configuration,
+  grants, tasks, idempotency records, and audit events then survive instance
+  replacement and deployment.
+- Durable Vercel mode respects `SEED_DEMO_USERS`; when disabled, the first Admin
+  is created from `BOOTSTRAP_ADMIN_EMAIL` and the serverless secret
+  `BOOTSTRAP_ADMIN_PASSWORD`. SFTP credentials use the serverless secret
+  `APP_CREDENTIAL_ENCRYPTION_KEY`. Secret values must be stored only in Vercel
+  environment configuration and never committed.
+- `DEPLOYMENT_MODE` is the authoritative `demo`/`production` selector when set.
+  Demo mode seeds and normalizes the documented accounts and permits their
+  publication only in the login footer. Production mode disables demo seeding
+  and public credential disclosure, and Vercel startup rejects production mode
+  unless `DATABASE_URL` selects PostgreSQL. `SEED_DEMO_USERS` remains a
+  compatibility fallback when the selector is absent.
+- Vercel demonstration mode does not satisfy production backup, continuous
+  scheduler ownership, filesystem-log retention, or general-purpose SFTP
+  hosting requirements. Its private Blob adapter is for the seeded MOCK server,
+  while Compose remains the supported all-in-one production runtime.
+- PostgreSQL and private Blob make request-driven demo state and MOCK files
+  durable, but Vercel Functions still do not provide continuous APScheduler
+  ownership or a durable filesystem. Structured logs go to stdout for Vercel
+  Runtime Logs; longer-term operational-log retention requires a supported
+  external collector or Vercel Log Drain. Immutable application audit events
+  remain durable in PostgreSQL.
+
 ## 13. SQLite persistence and future scaling
 
-SQLite is the durable system of record for users, sessions, servers, encrypted credentials, grants, task definitions, task instances, idempotency records, and audit events. SQLAlchemy 2.x supplies the data-access layer, and `aiosqlite` supplies asynchronous access. The declared SQLAlchemy metadata and `schema_baseline` marker are the only schema authority; migration scripts and migration dependencies are intentionally absent.
+SQLite is the durable Compose system of record for users, sessions, servers,
+encrypted credentials, grants, task definitions, task instances, idempotency
+records, and audit events. PostgreSQL provides the same durable system of record
+for Vercel. SQLAlchemy 2.x supplies the data-access layer, with `aiosqlite` and
+`asyncpg` as the asynchronous drivers. The declared SQLAlchemy metadata and
+`schema_baseline` marker are the only schema authority; migration scripts and
+migration dependencies are intentionally absent.
 
 SQLite requirements:
 
@@ -75,4 +128,8 @@ SQLite requirements:
 - Treat version 1.2 as the schema baseline: an empty host `db` directory is initialized automatically, while importing or incrementally upgrading a pre-baseline or future-incompatible database is outside scope and fails startup.
 - No database backup or restore workflow is required for this deployment; operators may intentionally stop the stack, clear the host `db` directory, and start from a fresh baseline when data can be discarded.
 
-Repository interfaces must remain database-agnostic so a future PostgreSQL migration does not change route or service contracts. Before horizontal backend scaling, replace SQLite or prove a supported shared-storage topology, add distributed session/idempotency behavior, and use a distributed scheduler or leader-election mechanism.
+Repository interfaces must remain database-agnostic so SQLite and PostgreSQL do
+not change route or service contracts. Before horizontal backend scaling, use
+PostgreSQL or prove a supported shared-storage topology, preserve distributed
+session/idempotency behavior, and use a distributed scheduler or
+leader-election mechanism.

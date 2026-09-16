@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     environment:
       APP_ENV: production
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-demo}
       DATABASE_URL: sqlite+aiosqlite:////data/sftp-manager.db
       SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
       APP_CREDENTIAL_ENCRYPTION_KEY_FILE: /run/secrets/credential_encryption_key
@@ -58,6 +59,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-demo}
       BACKEND_INTERNAL_URL: http://backend:8000
       UPLOAD_PROXY_MAX_BODY_SIZE: ${UPLOAD_PROXY_MAX_BODY_SIZE:-8mb}
     depends_on:
